@@ -1,0 +1,7 @@
+[project]
+name = "adaptiverag"
+version = "0.1.0"
+description = "Intelligent Data Platform: Hybrid RAG + MCP Architecture"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
