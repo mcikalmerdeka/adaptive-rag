@@ -1,0 +1,37 @@
+uv run .\test_qwen.py
+
+(.venv) PS E:\Personal Projects\AdaptiveRAG> uv run .\test_qwen.py
+```markdown
+# KOTA PALU DALAM ANGKA 2025  
+**Table 3.1.2**  
+**Population by Age Groups and Sex in Palu Municipality (people), 2024**  
+*Jumlah Penduduk Menurut Kelompok Umur dan Jenis Kelamin di Kota Palu (jiwa), 2024*
+
+| Kelompok Umur<br>Age Groups | Laki-Laki<br>Male | Perempuan<br>Female | Jumlah<br>Total |
+|------------------------------|-------------------|---------------------|-----------------|
+| (1)                          | (2)               | (3)                 | (4)             |
+| 0–4                          | 14,509            | 13,551              | 28,060          |
+| 5–9                          | 18,391            | 17,180              | 35,571          |
+| 10–14                        | 17,605            | 16,277              | 33,882          |
+| 15–19                        | 14,254            | 13,753              | 28,007          |
+| 20–24                        | 17,804            | 17,306              | 35,110          |
+| 25–29                        | 17,495            | 17,490              | 34,985          |
+| 30–34                        | 16,508            | 16,785              | 33,293          |
+| 35–39                        | 15,470            | 15,470              | 30,684          |
+| 40–44                        | 14,839            | 14,701              | 29,540          |
+| 45–49                        | 12,997            | 13,157              | 26,154          |
+| 50–54                        | 10,944            | 11,713              | 22,657          |
+| 55–59                        | 9,112             | 9,952               | 19,064          |
+| 60–64                        | 6,482             | 6,825               | 13,307          |
+| 65–69                        | 4,361             | 4,780               | 9,141           |
+| 70–74                        | 2,534             | 2,819               | 5,353           |
+| 75+                          | 2,111             | 3,040               | 5,151           |
+| **Kota Palu**                | **195,416**       | **194,543**         | **389,959**     |
+
+---
+
+**Catatan/Note:**  
+**Sumber/Source:** Dinas Kependudukan dan Catatan Sipil / Population and Registration Civil Agency  
+
+*Page 64 — PALU MUNICIPALITY IN FIGURES 2025*
+```
