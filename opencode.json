@@ -1,0 +1,56 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["superpowers@git+https://github.com/obra/superpowers.git"],
+  "mcp": {
+    "gradio": {
+      "type": "remote",
+      "url": "https://gradio-docs-mcp.hf.space/gradio_api/mcp/",
+      "enabled": true,
+      "headers": {}
+    },
+    "apify": {
+      "type": "remote",
+      "url": "https://mcp.apify.com/?tools=docs",
+      "enabled": true,
+      "headers": {}
+    },
+    "Agno": {
+      "type": "remote",
+      "url": "https://docs.agno.com/mcp",
+      "enabled": true,
+      "headers": {}
+    },
+    "Docs by LangChain": {
+      "type": "remote",
+      "url": "https://docs.langchain.com/mcp",
+      "enabled": true,
+      "headers": {}
+    },
+    "langfuse-docs": {
+      "type": "remote",
+      "url": "https://langfuse.com/api/mcp",
+      "enabled": true,
+      "headers": {}
+    },
+    "n8n-docs": {
+      "type": "remote",
+      "url": "https://n8n.mcp.kapa.ai/",
+      "enabled": true,
+      "headers": {}
+    },
+    "exa": {
+      "type": "remote",
+      "url": "https://mcp.exa.ai/mcp",
+      "enabled": true,
+      "headers": {}
+    },
+    "Neon": {
+      "type": "remote",
+      "url": "https://mcp.neon.tech/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer napi_8jp6kt4ci2ob5lz0jzgv5wivdov439h72if6hg4zqyy2w1krw8f0thwmzl0e5dpz"
+      }
+    }
+  }
+}
