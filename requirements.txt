@@ -8,4 +8,7 @@ langchain-openai>=1.2.1
 langchain-qdrant>=1.1.0
 langchain-text-splitters>=1.1.2
 openai>=2.33.0
+pillow>=10.4.0
+pypdfium2>=4.30.0
 python-dotenv>=1.2.2
+tenacity>=9.0.0

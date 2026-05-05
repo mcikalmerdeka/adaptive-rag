@@ -1,98 +1,114 @@
-# Document to Markdown Converter
+# AdaptiveRAG
 
-Convert various document formats (PDF, DOCX, PPTX, XLSX, images, HTML, and more) to clean Markdown using [Docling](https://github.com/docling-project/docling).
+**Hybrid Adaptive RAG with query-time strategy selection, markdown-first ingestion, and an optional MCP tool surface.**
 
-This is **Step 1** of the intelligent document processing pipeline — establishing a reliable document-to-markdown conversion layer before chunking and RAG operations.
+This project intelligently routes data and queries: documents go to a vector store, structured data is queried live via tools, and the LLM picks the right strategy *per query* — not per file extension.
 
-## Features
+> Heads up: this is a phased build. Right now we're at **Phase 2** — solid document → markdown conversion with smart parser routing. Vector indexing, retrieval, and the adaptive query router come next.
 
-- **Multi-format support**: PDF, DOCX, PPTX, XLSX, HTML, Markdown, images (PNG, JPEG, TIFF, BMP, WEBP), CSV, AsciiDoc, XML, JSON
-- **File type detection**: Automatic format detection and validation
-- **Markdown preview**: Real-time preview of converted markdown
-- **Export**: One-click download of the generated `.md` file
-- **Clean architecture**: Modular design ready for extension (chunking, embedding, etc.)
+See:
+- `ARCHITECTURE.md` — full system design and rationale
+- `PROJECT_PLAN.md` — phase-by-phase checklist with progress
 
-## Project Structure
+---
+
+## Phase 2 — Document → Markdown ingestion (current)
+
+What works today:
+
+- **Multi-format input:** `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html` / `.htm`, `.md`, `.txt`, `.csv`, `.png`, `.jpg` / `.jpeg`, `.webp`
+- **Smart parser routing:**
+
+  | Input | Parser | Why |
+  |---|---|---|
+  | `.md`, `.txt` | passthrough | already markdown / plain text |
+  | `.png`, `.jpg`, `.webp` | Qwen3-VL | vision model beats local OCR |
+  | `.pdf` (born-digital) | Docling | fast, free, lossless |
+  | `.pdf` (scanned) | Qwen3-VL per page | better than EasyOCR on layouts |
+  | `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv` | Docling | native structural parsing |
+
+- **Born-digital vs scanned heuristic:** PDFs with <150 chars of extractable text in the first 3 pages are treated as scanned and routed to Qwen.
+- **Disk cache:** OCR results are SHA256-keyed in `.cache/ocr/`. Re-uploading the same file (or re-OCR'ing the same page) returns instantly without an API call.
+- **Override:** UI checkbox forces Qwen on PDFs when you know OCR quality matters.
+- **Progress:** multi-page scanned PDFs report per-page progress.
+- **Retry:** Qwen calls retry with exponential backoff on rate limit / network errors.
+
+## Project structure
 
 ```
-.
-├── src/
-│   ├── core/
-│   │   ├── file_detector.py      # File type detection & validation
-│   │   └── converter.py           # Docling wrapper for markdown conversion
-│   └── app.py                     # Gradio web interface
+adaptive-rag/
+├── app.py                          # Gradio entry
+├── ARCHITECTURE.md
+├── PROJECT_PLAN.md
+├── .env.example
+├── pyproject.toml
 ├── requirements.txt
-└── README.md
+└── src/
+    ├── core/
+    │   ├── file_detector.py        # extension/MIME → DocumentFormat
+    │   ├── docling_parser.py       # Docling wrapper
+    │   ├── qwen_parser.py          # Qwen3-VL OCR + retry
+    │   ├── parser_router.py        # picks parser per file
+    │   └── converter.py            # public API used by UI
+    ├── utils/
+    │   └── pdf_inspector.py        # born-digital heuristic + page rendering
+    ├── cache/
+    │   └── ocr_cache.py            # SHA256 disk cache for OCR results
+    └── ui/
+        └── markdown_converter_ui.py
 ```
 
-## Installation
-
-1. Create a virtual environment (recommended):
+## Setup
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# 1. Install dependencies (uv recommended)
+uv sync
+
+# 2. Copy and fill in your API keys
+cp .env.example .env
+# edit .env and set OPENAI_API_KEY and QWEN_API_KEY
+
+# 3. Run the app
+uv run app.py
 ```
 
-2. Install dependencies:
+Open `http://localhost:7860`.
 
-```bash
-pip install -r requirements.txt
-```
+> First run downloads Docling models (~1-2 GB). Subsequent runs use the local cache.
 
-> **Note**: Docling will download AI models on first run (OCR, table structure, etc.). This may take a few minutes depending on your connection.
+## API keys
 
-## Usage
+| Variable | Used for | Get it at |
+|---|---|---|
+| `QWEN_API_KEY` | Image + scanned PDF OCR via Qwen3-VL | https://dashscope.aliyun.com/ |
+| `OPENAI_API_KEY` | Embeddings + LLM (later phases) | https://platform.openai.com/ |
 
-Run the Gradio application:
+If `QWEN_API_KEY` is missing, the UI still runs — but uploading an image or scanned PDF will fail. Born-digital documents work fine without it.
+
+## Running
 
 ```bash
 uv run app.py
 ```
 
-Then open your browser at `http://localhost:7860`.
+The Gradio interface lets you:
 
-### How to use
+1. Upload a file
+2. Optionally tick "Force Qwen3-VL OCR for PDFs"
+3. Click **Convert to Markdown**
+4. See the parser used (`docling` / `qwen3-vl` / `passthrough`) in the status
+5. Preview and download the `.md`
 
-1. **Upload** a document using the file picker
-2. **Convert** by clicking the "Convert to Markdown" button
-3. **Preview** the generated markdown in the right panel
-4. **Download** the `.md` file using the download button
+## Roadmap
 
-## Architecture
+This phase finishes once we can ingest each supported format reliably. Next up:
 
-This application follows a layered architecture designed for future extension:
+- **Phase 3:** header-aware chunking + hybrid (dense + BM25) Qdrant indexing
+- **Phase 4:** retrieval with reranker, basic RAG chat
+- **Phase 5:** the actual *adaptive* router — query-time strategy selection across `no_retrieval` / `vector_only` / `sql_only` / `hybrid` / `clarify`
+- **Phase 6:** Ragas evaluation, Langfuse tracing, cost tracking
 
-```
-┌─────────────────────────────────────┐
-│           Gradio UI (src/app.py)     │
-│  - File upload, preview, download    │
-├─────────────────────────────────────┤
-│      Converter Service               │
-│  - Docling wrapper, error handling   │
-├─────────────────────────────────────┤
-│      File Type Detector              │
-│  - Extension/mime detection          │
-│  - Supported format validation       │
-├─────────────────────────────────────┤
-│           Docling Engine             │
-│  - PDF, Office, Image parsing        │
-│  - Markdown export                   │
-└─────────────────────────────────────┘
-```
-
-## Next Steps (Future Pipeline)
-
-1. ✅ **Document Converter** (this step) — convert any format to Markdown
-2. 🔄 **Chunking** — split markdown into semantically meaningful chunks
-3. 🔄 **Embedding** — generate vector embeddings for each chunk
-4. 🔄 **Vector Store** — store embeddings for retrieval
-5. 🔄 **RAG Query** — retrieve relevant chunks and generate answers
-
-## Dependencies
-
-- [docling](https://github.com/docling-project/docling) — Document parsing and conversion
-- [gradio](https://gradio.app) — Web UI framework
+Full plan in `PROJECT_PLAN.md`.
 
 ## License
 

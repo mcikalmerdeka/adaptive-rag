@@ -16,6 +16,9 @@ wheels/
 .opencode/
 .cursor/
 
+# Caches
+.cache/
+
 # Other files
 other/
 error/

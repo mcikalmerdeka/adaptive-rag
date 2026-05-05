@@ -1,151 +1,125 @@
-"""Document converter module using Docling.
+"""Public conversion API.
 
-This module wraps Docling's DocumentConverter to provide a clean interface
-for converting various document formats to Markdown.
+This is the only thing the UI / external code should need to import. It
+ties together file detection, parser routing, and progress reporting into
+one stable interface.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-# Fix Windows symlink privilege error when downloading Docling models
-# Hugging Face Hub tries to create symlinks by default, which requires
-# admin rights or Developer Mode on Windows. Disabling symlinks forces
-# copies instead, avoiding WinError 1314.
-os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
-
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.document import ConversionResult
-from docling.document_converter import DocumentConverter
-
+from .docling_parser import DoclingParserError
 from .file_detector import FileTypeDetector, FileTypeInfo
+from .parser_router import ParserRouter, ParseResult
+from .qwen_parser import QwenParserError
 
 logger = logging.getLogger(__name__)
 
 
 class DocumentConverterError(Exception):
-    """Raised when document conversion fails."""
+    """Wraps any failure during conversion (detection, parsing, IO)."""
 
-    pass
+
+@dataclass
+class ConversionOutput:
+    markdown: str
+    parser: str
+    pages: int | None
+    file_info: FileTypeInfo
 
 
 class MarkdownConverterService:
-    """Service for converting documents to Markdown using Docling.
+    """High-level API that the Gradio UI consumes.
 
-    This is the core component of the document processing pipeline.
-    It handles conversion of multiple file formats to clean Markdown.
+    Backward-compatible: ``convert(path) -> str`` still works. New callers
+    can use ``convert_detailed`` to get parser provenance and page count.
     """
 
     def __init__(self) -> None:
-        """Initialize the converter service with Docling."""
         self._detector = FileTypeDetector()
-        self._converter = DocumentConverter()
-        logger.info("DocumentConverterService initialized with Docling")
+        self._router = ParserRouter()
+        logger.info("MarkdownConverterService initialized")
 
     @property
     def detector(self) -> FileTypeDetector:
-        """Access the file type detector."""
         return self._detector
 
-    def convert(self, file_path: str | Path) -> str:
-        """Convert a document to Markdown.
+    @property
+    def supported_formats(self) -> list[str]:
+        return self._detector.supported_extensions
 
-        Args:
-            file_path: Path to the document file.
+    # ---- detection -----------------------------------------------------
 
-        Returns:
-            The document content as Markdown string.
+    def get_file_info(self, file_path: str | Path) -> FileTypeInfo:
+        return self._detector.detect(file_path)
 
-        Raises:
-            DocumentConverterError: If conversion fails.
-            ValueError: If file format is not supported.
-            FileNotFoundError: If file does not exist.
-        """
-        file_path = Path(file_path)
+    # ---- conversion ----------------------------------------------------
 
-        # Step 1: Validate file type
+    def convert(
+        self,
+        file_path: str | Path,
+        force_qwen_for_pdf: bool = False,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> str:
+        return self.convert_detailed(
+            file_path,
+            force_qwen_for_pdf=force_qwen_for_pdf,
+            progress=progress,
+        ).markdown
+
+    def convert_detailed(
+        self,
+        file_path: str | Path,
+        force_qwen_for_pdf: bool = False,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> ConversionOutput:
+        info = self._detector.validate(file_path)
+        logger.info(
+            f"Converting {info.path.name} (format: {info.format.value})"
+        )
+
         try:
-            file_info = self._detector.validate(file_path)
-            logger.info(
-                f"Converting {file_info.path.name} "
-                f"(format: {file_info.format.value})"
+            result: ParseResult = self._router.parse(
+                info,
+                force_qwen_for_pdf=force_qwen_for_pdf,
+                progress=progress,
             )
+        except (DoclingParserError, QwenParserError) as exc:
+            raise DocumentConverterError(str(exc)) from exc
         except (ValueError, FileNotFoundError):
             raise
-
-        # Step 2: Convert using Docling
-        try:
-            result: ConversionResult = self._converter.convert(str(file_path))
-
-            if result.status.name != "SUCCESS":
-                raise DocumentConverterError(
-                    f"Conversion failed with status: {result.status.name}"
-                )
-
-            # Step 3: Export to Markdown
-            markdown_content = result.document.export_to_markdown()
-
-            if not markdown_content or not markdown_content.strip():
-                logger.warning(f"Document produced empty markdown: {file_path.name}")
-                return ""
-
-            logger.info(
-                f"Successfully converted {file_path.name} "
-                f"({len(markdown_content)} characters)"
-            )
-            return markdown_content
-
-        except DocumentConverterError:
-            raise
-        except Exception as e:
-            logger.exception(f"Unexpected error converting {file_path.name}")
+        except Exception as exc:
+            logger.exception(f"Unexpected failure converting {info.path.name}")
             raise DocumentConverterError(
-                f"Failed to convert {file_path.name}: {str(e)}"
-            ) from e
+                f"Failed to convert {info.path.name}: {exc}"
+            ) from exc
+
+        if not result.markdown.strip():
+            logger.warning(f"Empty markdown output for {info.path.name}")
+
+        return ConversionOutput(
+            markdown=result.markdown,
+            parser=result.parser,
+            pages=result.pages,
+            file_info=info,
+        )
 
     def convert_and_save(
         self,
         file_path: str | Path,
         output_path: str | Path | None = None,
+        force_qwen_for_pdf: bool = False,
     ) -> Path:
-        """Convert a document and save the Markdown to a file.
-
-        Args:
-            file_path: Path to the document file.
-            output_path: Optional output path. If not provided, a temporary file
-                        is created with the same name but .md extension.
-
-        Returns:
-            Path to the saved Markdown file.
-        """
-        markdown_content = self.convert(file_path)
-
+        markdown = self.convert(file_path, force_qwen_for_pdf=force_qwen_for_pdf)
         if output_path is None:
-            # Create a temp file with the same stem but .md extension
-            input_path = Path(file_path)
-            output_path = Path(tempfile.gettempdir()) / f"{input_path.stem}.md"
-
+            stem = Path(file_path).stem
+            output_path = Path(tempfile.gettempdir()) / f"{stem}.md"
         output_path = Path(output_path)
-        output_path.write_text(markdown_content, encoding="utf-8")
+        output_path.write_text(markdown, encoding="utf-8")
         logger.info(f"Markdown saved to: {output_path}")
-
         return output_path
-
-    def get_file_info(self, file_path: str | Path) -> FileTypeInfo:
-        """Get information about a file without converting it.
-
-        Args:
-            file_path: Path to the file.
-
-        Returns:
-            FileTypeInfo with detection results.
-        """
-        return self._detector.detect(file_path)
-
-    @property
-    def supported_formats(self) -> list[str]:
-        """Return list of supported file extensions."""
-        return self._detector.supported_extensions

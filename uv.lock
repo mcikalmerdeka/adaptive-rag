@@ -39,7 +39,10 @@ dependencies = [
     { name = "langchain-qdrant" },
     { name = "langchain-text-splitters" },
     { name = "openai" },
+    { name = "pillow" },
+    { name = "pypdfium2" },
     { name = "python-dotenv" },
+    { name = "tenacity" },
 ]
 
 [package.metadata]
@@ -53,7 +56,10 @@ requires-dist = [
     { name = "langchain-qdrant", specifier = ">=1.1.0" },
     { name = "langchain-text-splitters", specifier = ">=1.1.2" },
     { name = "openai", specifier = ">=2.33.0" },
+    { name = "pillow", specifier = ">=10.4.0" },
+    { name = "pypdfium2", specifier = ">=4.30.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "tenacity", specifier = ">=9.0.0" },
 ]
 
 [[package]]

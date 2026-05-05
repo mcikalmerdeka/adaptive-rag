@@ -1,7 +1,7 @@
 [project]
 name = "adaptiverag"
 version = "0.1.0"
-description = "Intelligent Data Platform: Hybrid RAG + MCP Architecture"
+description = "Intelligent Data Platform: Hybrid Adaptive RAG + MCP Architecture"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -14,7 +14,10 @@ dependencies = [
     "langchain-qdrant>=1.1.0",
     "langchain-text-splitters>=1.1.2",
     "openai>=2.33.0",
+    "pillow>=10.4.0",
+    "pypdfium2>=4.30.0",
     "python-dotenv>=1.2.2",
+    "tenacity>=9.0.0",
 ]
 
 [build-system]
