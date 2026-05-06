@@ -89,41 +89,50 @@
 
 ---
 
-## Phase 3 — Chunking + Indexing ⬜
+## Phase 3 — Chunking + Indexing ✅
 
 **Goal:** Header-aware chunking + hybrid (dense + BM25) indexing in Qdrant.
 
 ### Modules
 
-- [ ] `src/chunking/markdown_chunker.py`
-  - [ ] `MarkdownHeaderTextSplitter` primary split
-  - [ ] `RecursiveCharacterTextSplitter` fallback for oversized sections
-  - [ ] Inject `header_path`, `doc_id`, `chunk_index`, `total_chunks`, `parser` into metadata
-- [ ] `src/chunking/metadata.py` — content-hash doc_id, ingestion timestamp
-- [ ] `src/indexing/embeddings.py` — dense (`text-embedding-3-small`) + sparse (FastEmbed BM25)
-- [ ] `src/indexing/qdrant_store.py` — hybrid collection setup, upsert logic
-- [ ] `src/indexing/deduplication.py` — skip already-indexed `doc_id`
-- [ ] `src/cache/embedding_cache.py` — SHA256(text + model) → vector
+- [x] `src/chunking/markdown_chunker.py`
+  - [x] `MarkdownHeaderTextSplitter` primary split (`#`/`##`/`###`, `strip_headers=False`)
+  - [x] `RecursiveCharacterTextSplitter` fallback for oversized sections (>1500 chars)
+  - [x] Inject `header_path`, `doc_id`, `chunk_index`, `total_chunks`, `parser`, `pages` into metadata
+- [x] `src/chunking/metadata.py` — content-hash `doc_id`, deterministic `chunk_uuid` (UUID5), ingestion timestamp
+- [x] `src/indexing/embeddings.py` — dense (`text-embedding-3-small`, cached) + sparse (FastEmbed `Qdrant/bm25`)
+- [x] `src/indexing/qdrant_store.py` — hybrid collection (named vectors + IDF modifier), upsert, doc-level dedup, library listing, delete-by-doc
+- [x] Deduplication is part of `QdrantStore` (skip / replace / count-by-doc) — no separate module needed
+- [x] `src/cache/embedding_cache.py` — wraps OpenAI embeddings with `CacheBackedEmbeddings` + `LocalFileStore`
+- [x] `src/indexing/pipeline.py` — convert → chunk → upsert orchestrator
 
 ### Infrastructure
 
-- [ ] `docker-compose.yml` with Qdrant
-- [ ] `scripts/init_qdrant.py` — create collection with hybrid config
+- [x] `docker-compose.yml` with Qdrant (REST 6333 + gRPC 6334)
+- [x] `scripts/init_qdrant.py` — verifies/creates collection, supports `--recreate`
 
 ### Dependencies
 
-- [ ] Add `qdrant-client>=1.12`
-- [ ] Add `fastembed>=0.4`
+- [x] Added `qdrant-client>=1.12`
+- [x] Added `fastembed>=0.4.2`
 
 ### UI
 
-- [ ] New tab: "Ingest" — upload → convert → chunk → index → confirmation with chunk count
+- [x] Refactored `src/ui` into tab-based composition (`main_ui.py`)
+- [x] New tab: **Ingest** — multi-file upload → convert → chunk → index, with library table, refresh, and delete-by-doc-id
 
 **Acceptance:**
-1. Upload doc → indexed with N chunks.
-2. Re-upload same doc → skipped (dedup by doc_id).
-3. Qdrant has both dense + sparse vectors per chunk.
-4. Each chunk has `header_path` metadata visible.
+1. Upload doc → indexed with N chunks. ✅
+2. Re-upload same doc → replaces by default (UUID5 deterministic IDs); checkbox flips to skip-if-exists. ✅
+3. Qdrant has both dense + sparse vectors per chunk (named vectors). ✅
+4. Each chunk has `header_path` metadata visible (e.g. `"Refund Policy > Eligibility"`). ✅
+
+**Known limitation:** `py-rust-stemmers` 0.1.5 segfaults on Python 3.14
+([qdrant/py-rust-stemmers#9](https://github.com/qdrant/py-rust-stemmers/pull/9)).
+We pass `disable_stemmer=True` to FastEmbed BM25 as a workaround. Drop the
+flag in `src/indexing/embeddings.py::build_sparse_embeddings` once a fixed
+release is published. Quality impact is small (only stemming-sensitive
+queries like "running"/"runs" are affected).
 
 ---
 
@@ -230,9 +239,9 @@ Optional, only if time permits.
 
 ## Currently Working On
 
-**Phase 2 — Parser Router + Qwen3-VL OCR Fallback** 🚧
+**Phase 4 — Hybrid Retrieval + Reranker + Basic Chat** ⬜
 
-Next concrete action: refactor `src/core/` to split parsers, add Qwen, add caching, trim file_detector formats.
+Next concrete action: build `src/retrieval/hybrid_search.py` (Qdrant prefetch + RRF), add a reranker, wire a Chat tab.
 
 ---
 
@@ -240,10 +249,10 @@ Next concrete action: refactor `src/core/` to split parsers, add Qwen, add cachi
 
 | Phase | Status | % |
 |---|---|---|
-| 0. Setup | ✅ | 95% |
+| 0. Setup | ✅ | 100% |
 | 1. Docling baseline | ✅ | 100% |
-| 2. Parser router + Qwen | 🚧 | 0% |
-| 3. Chunking + indexing | ⬜ | 0% |
+| 2. Parser router + Qwen | ✅ | 100% |
+| 3. Chunking + indexing | ✅ | 100% |
 | 4. Retrieval + chat | ⬜ | 0% |
 | 5. Adaptive router | ⬜ | 0% |
 | 6. Eval + polish | ⬜ | 0% |

@@ -1,6 +1,6 @@
-"""Main entry point for the Document to Markdown Converter.
+"""Main entry point for the AdaptiveRAG Gradio application.
 
-Run this file directly to start the Gradio web application:
+Run:
     uv run app.py
 """
 
@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import logging
 
-import gradio as gr
-
 from src.core.converter import MarkdownConverterService
-from src.ui.markdown_converter_ui import build_app
+from src.ui import build_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,10 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """Run the Gradio application."""
-    logger.info("Initializing Document Converter Service...")
-    MarkdownConverterService()  # warm-up
-    logger.info("Converter ready!")
+    logger.info("Warming up document converter (Docling models may download on first run)...")
+    MarkdownConverterService()
+    logger.info("Converter ready.")
 
     app = build_app()
     app.launch(

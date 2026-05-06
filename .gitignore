@@ -19,7 +19,11 @@ wheels/
 # Caches
 .cache/
 
+# Local Qdrant storage
+qdrant_storage/
+
 # Other files
 other/
 error/
 inspiration/
+qwen_test/

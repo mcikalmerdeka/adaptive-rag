@@ -1,11 +1,7 @@
-"""Gradio UI for the Document → Markdown step.
+"""Convert tab: upload a single document, preview the markdown, download it.
 
-Lets the user upload a file, see what parser was selected (Docling /
-Qwen3-VL / passthrough), preview the markdown, and download it.
-
-A "Force Qwen3-VL OCR for PDFs" checkbox overrides the born-digital
-heuristic when the user knows OCR quality matters (mathematical layouts,
-tightly packed tables, scanned docs the heuristic misses).
+This module renders Gradio components inside an existing parent context
+(typically a ``gr.Tab``). Use ``render_convert_tab()`` from ``main_ui``.
 """
 
 from __future__ import annotations
@@ -15,12 +11,9 @@ import tempfile
 from pathlib import Path
 
 import gradio as gr
-from dotenv import load_dotenv
 
 from src.core import DocumentConverterError, MarkdownConverterService
 from src.core.qwen_parser import QwenParser
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +25,6 @@ def _get_service() -> MarkdownConverterService:
     if _service is None:
         _service = MarkdownConverterService()
     return _service
-
-
-# ---- helpers ----------------------------------------------------------
 
 
 def _resolve_path(file_info) -> str | None:
@@ -68,9 +58,7 @@ def _format_file_info(file_info) -> str:
     try:
         info = _get_service().get_file_info(file_path)
         format_str = info.format.value.upper()
-        supported = (
-            "Supported" if info.is_supported else "Not supported"
-        )
+        supported = "Supported" if info.is_supported else "Not supported"
     except Exception as exc:
         format_str = "Unknown"
         supported = f"Error: {exc}"
@@ -171,10 +159,8 @@ def _clear_all():
     )
 
 
-# ---- layout -----------------------------------------------------------
-
-
-def build_app() -> gr.Blocks:
+def render_convert_tab() -> None:
+    """Build the Convert tab. Call inside ``with gr.Tab(...):``."""
     qwen_available = QwenParser.is_configured()
     qwen_note = (
         "Qwen3-VL is configured. Images and scanned PDFs will use it automatically."
@@ -183,114 +169,101 @@ def build_app() -> gr.Blocks:
         "Add it to .env to enable."
     )
 
-    with gr.Blocks(title="AdaptiveRAG — Document → Markdown") as demo:
-        gr.Markdown(
-            """
-            # AdaptiveRAG — Document → Markdown
+    gr.Markdown(
+        """
+        ### Convert any document to clean markdown
 
-            Upload a document and convert it to clean markdown. The router
-            picks the best parser per file:
+        The router picks the best parser per file:
 
-            - **Docling** for `.pdf` (born-digital), `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv`
-            - **Qwen3-VL** for images and scanned PDFs
-            - **Passthrough** for `.md` and `.txt`
-            """
-        )
+        - **Docling** for `.pdf` (born-digital), `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv`
+        - **Qwen3-VL** for images and scanned PDFs
+        - **Passthrough** for `.md` and `.txt`
+        """
+    )
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                gr.Markdown("### Upload")
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("#### Upload")
 
-                file_input = gr.File(
-                    label="Select a file",
-                    file_count="single",
-                    type="filepath",
-                )
+            file_input = gr.File(
+                label="Select a file",
+                file_count="single",
+                type="filepath",
+            )
 
-                file_info_display = gr.Markdown(
-                    value="Upload a document to get started."
-                )
+            file_info_display = gr.Markdown(
+                value="Upload a document to get started."
+            )
 
-                force_qwen = gr.Checkbox(
-                    label="Force Qwen3-VL OCR for PDFs",
-                    value=False,
-                    info=(
-                        "Override the born-digital heuristic. Use when "
-                        "Docling's output is poor on complex layouts. "
-                        "Will incur Qwen API costs."
-                    ),
-                    interactive=qwen_available,
-                )
+            force_qwen = gr.Checkbox(
+                label="Force Qwen3-VL OCR for PDFs",
+                value=False,
+                info=(
+                    "Override the born-digital heuristic. Use when "
+                    "Docling's output is poor on complex layouts. "
+                    "Will incur Qwen API costs."
+                ),
+                interactive=qwen_available,
+            )
 
-                with gr.Row():
-                    convert_btn = gr.Button(
-                        "Convert to Markdown",
-                        variant="primary",
-                        size="lg",
-                    )
-                    clear_btn = gr.Button(
-                        "Clear",
-                        variant="secondary",
-                        size="lg",
-                    )
-
-                status_display = gr.Markdown(value="")
-
-                download_btn = gr.DownloadButton(
-                    label="Download Markdown",
+            with gr.Row():
+                convert_btn = gr.Button(
+                    "Convert to Markdown",
                     variant="primary",
                     size="lg",
-                    visible=False,
+                )
+                clear_btn = gr.Button(
+                    "Clear",
+                    variant="secondary",
+                    size="lg",
                 )
 
-                with gr.Accordion("Supported formats", open=False):
-                    gr.Markdown(_get_service().detector.supported_formats_text)
+            status_display = gr.Markdown(value="")
 
-                gr.Markdown(f"_{qwen_note}_")
+            download_btn = gr.DownloadButton(
+                label="Download Markdown",
+                variant="primary",
+                size="lg",
+                visible=False,
+            )
 
-            with gr.Column(scale=2):
-                gr.Markdown("### Markdown preview")
+            with gr.Accordion("Supported formats", open=False):
+                gr.Markdown(_get_service().detector.supported_formats_text)
 
-                markdown_preview = gr.Textbox(
-                    label="Converted Markdown",
-                    lines=25,
-                    max_lines=30,
-                    interactive=False,
-                    buttons=["copy"],
-                    autoscroll=False,
-                )
+            gr.Markdown(f"_{qwen_note}_")
 
-        file_input.change(
-            fn=_format_file_info,
-            inputs=file_input,
-            outputs=file_info_display,
-        )
+        with gr.Column(scale=2):
+            gr.Markdown("#### Markdown preview")
 
-        convert_btn.click(
-            fn=_convert_document,
-            inputs=[file_input, force_qwen],
-            outputs=[markdown_preview, status_display, download_btn],
-        )
+            markdown_preview = gr.Textbox(
+                label="Converted Markdown",
+                lines=25,
+                max_lines=30,
+                interactive=False,
+                buttons=["copy"],
+                autoscroll=False,
+            )
 
-        clear_btn.click(
-            fn=_clear_all,
-            inputs=[],
-            outputs=[
-                file_input,
-                file_info_display,
-                status_display,
-                markdown_preview,
-                download_btn,
-            ],
-        )
+    file_input.change(
+        fn=_format_file_info,
+        inputs=file_input,
+        outputs=file_info_display,
+    )
 
-        gr.Markdown(
-            """
-            ---
-            Powered by [Docling](https://github.com/docling-project/docling)
-            and [Qwen3-VL](https://help.aliyun.com/zh/dashscope/) ·
-            Built with [Gradio](https://gradio.app)
-            """
-        )
+    convert_btn.click(
+        fn=_convert_document,
+        inputs=[file_input, force_qwen],
+        outputs=[markdown_preview, status_display, download_btn],
+    )
 
-    return demo
+    clear_btn.click(
+        fn=_clear_all,
+        inputs=[],
+        outputs=[
+            file_input,
+            file_info_display,
+            status_display,
+            markdown_preview,
+            download_btn,
+        ],
+    )
