@@ -108,7 +108,7 @@ def cached_embeddings(
     underlying: Embeddings,
     *,
     namespace: str,
-    cache_dir: str | Path = ".cache/embeddings",
+    cache_dir: str | Path = "./.cache/embeddings",
 ) -> Embeddings:
     """Return ``underlying`` wrapped in a SHA256-keyed disk cache.
 

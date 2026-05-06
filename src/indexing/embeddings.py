@@ -9,6 +9,9 @@ We use:
 
 Set ``HF_HUB_DISABLE_SYMLINKS=1`` so FastEmbed model downloads don't
 trigger Windows symlink-permission errors.
+
+All defaults flow from :mod:`src.config.settings` — override them via
+``.env`` (e.g. ``DENSE_MODEL=text-embedding-3-large``).
 """
 
 from __future__ import annotations
@@ -23,22 +26,19 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import FastEmbedSparse
 
 from src.cache import cached_embeddings
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_DENSE_MODEL = "text-embedding-3-small"
-DEFAULT_DENSE_SIZE = 1536  # dims of text-embedding-3-small
-DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
-
-
 def build_dense_embeddings(
-    model: str = DEFAULT_DENSE_MODEL,
+    model: str | None = None,
     *,
     use_cache: bool = True,
 ) -> Embeddings:
     """Return a configured OpenAI dense embedder, optionally cached on disk."""
-    if not os.getenv("OPENAI_API_KEY"):
+    model = model or settings.DENSE_MODEL
+    if not settings.OPENAI_API_KEY:
         raise RuntimeError(
             "OPENAI_API_KEY is not set. Add it to .env to enable dense embeddings."
         )
@@ -47,10 +47,14 @@ def build_dense_embeddings(
     if not use_cache:
         return base
 
-    return cached_embeddings(base, namespace=model)
+    return cached_embeddings(
+        base,
+        namespace=model,
+        cache_dir=settings.CACHE_DIR / "embeddings",
+    )
 
 
-def build_sparse_embeddings(model: str = DEFAULT_SPARSE_MODEL) -> FastEmbedSparse:
+def build_sparse_embeddings(model: str | None = None) -> FastEmbedSparse:
     """Return a FastEmbed BM25 sparse embedder.
 
     Lazy-downloads the tokenizer files (~few MB) on first use.
@@ -61,5 +65,6 @@ def build_sparse_embeddings(model: str = DEFAULT_SPARSE_MODEL) -> FastEmbedSpars
     once a fixed release is published — quality recovers slightly on
     stemming-sensitive queries (e.g. "running" vs "runs").
     """
+    model = model or settings.SPARSE_MODEL
     logger.info(f"Initializing sparse embeddings: {model} (stemmer disabled)")
     return FastEmbedSparse(model_name=model, disable_stemmer=True)

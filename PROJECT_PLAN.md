@@ -136,30 +136,42 @@ queries like "running"/"runs" are affected).
 
 ---
 
-## Phase 4 — Hybrid Retrieval + Reranker + Basic Chat ⬜
+## Phase 4 — Hybrid Retrieval + Reranker + Basic Chat ✅
 
 **Goal:** Ask questions, get answers grounded in indexed docs.
 
-- [ ] `src/retrieval/hybrid_search.py` — Qdrant prefetch (dense + sparse) with RRF fusion
-- [ ] `src/retrieval/reranker.py` — BGE-reranker-v2-m3 (local) OR Cohere Rerank (API)
-- [ ] `src/retrieval/citations.py` — chunk → source span mapping
-- [ ] `src/synthesis/response.py` — combine reranked context + LLM, return answer + citations
-- [ ] `src/ui/chat_ui.py` — chat interface with citation display
-- [ ] First Ragas baseline run
+### Modules
+
+- [x] `src/config/settings.py` — single source of truth for tunables (top-K, models, temperature, etc.) — overridable via `.env`
+- [x] `src/retrieval/hybrid_search.py` — `HybridRetriever` (Qdrant `similarity_search_with_score` over the named-vector hybrid collection — server-side RRF fusion) + `RetrievalPipeline` (prefetch → rerank → trim) with `RetrievedChunk` + `RetrievalReport` dataclasses
+- [x] `src/retrieval/reranker.py` — FlashRank ONNX cross-encoder wrapper (`ms-marco-MiniLM-L-12-v2` default, ~34 MB), graceful fallback if unavailable
+- [x] Citations live next to retrieval (`RetrievedChunk.citation_label()`) — no dedicated `citations.py` module needed
+- [x] `src/synthesis/response.py` — `GroundedAnswerer` builds a numbered-context prompt, calls `ChatOpenAI`, parses inline `[n]` citations into `Citation` objects
+- [x] `src/ui/chat_ui.py` — Chatbot + textbox + sources panel + per-turn debug strip; lazy init for retrieval/reranker/LLM so the tab opens fast
+
+### Refactor
+
+- [x] Migrated existing modules (`indexing/embeddings.py`, `indexing/qdrant_store.py`, `chunking/markdown_chunker.py`, `core/qwen_parser.py`) to read defaults from `src.config.settings` instead of duplicated env reads / hardcoded constants
+- [x] Reordered tabs (`Chat → Ingest → Convert`) so the primary workflow is front and center
 
 ### Dependencies
 
-- [ ] Add `sentence-transformers>=3.0` (BGE reranker, local)
-- [ ] Add `ragas>=0.2`, `datasets`
+- [x] Added `flashrank>=0.2.9` (pure-ONNX reranker, no Torch — keeps Python 3.14 install clean)
+- [x] LLM via existing `langchain-openai` (`ChatOpenAI`, model defaults to `gpt-4.1-mini`)
 
 ### UI
 
-- [ ] New tab: "Chat" — query input, streaming answer, citation chips
+- [x] New tab: **Chat** — `gr.Chatbot` + submit textbox, sources accordion, per-turn debug line (model · prefetch / rerank timings)
 
 **Acceptance:**
-1. Query a document, get an answer with at least one citation.
-2. Citation links back to the source chunk + filename.
-3. Ragas faithfulness >0.80 on initial 20-question golden set.
+1. Query a document, get an answer with at least one citation. ✅
+2. Citation links back to the source chunk + filename + header path. ✅
+3. Configurable `RERANK_TOP_K` (default 5) and `RETRIEVAL_PREFETCH_K` (default 25) via `.env`. ✅
+4. Reranker reorders the hybrid candidates (verified against the indexed sample corpus). ✅
+
+### Deferred to Phase 6
+
+- [ ] First Ragas baseline run (golden set + metrics) — moves with the other eval work in Phase 6 to keep this phase focused on the user-facing pipeline
 
 ---
 
@@ -239,9 +251,9 @@ Optional, only if time permits.
 
 ## Currently Working On
 
-**Phase 4 — Hybrid Retrieval + Reranker + Basic Chat** ⬜
+**Phase 5 — Adaptive Query Router** ⬜
 
-Next concrete action: build `src/retrieval/hybrid_search.py` (Qdrant prefetch + RRF), add a reranker, wire a Chat tab.
+Next concrete action: design the router prompt + Pydantic strategy schema in `src/routing/`, plug it in front of `RetrievalPipeline`, and add a SQL tool.
 
 ---
 
@@ -253,7 +265,7 @@ Next concrete action: build `src/retrieval/hybrid_search.py` (Qdrant prefetch + 
 | 1. Docling baseline | ✅ | 100% |
 | 2. Parser router + Qwen | ✅ | 100% |
 | 3. Chunking + indexing | ✅ | 100% |
-| 4. Retrieval + chat | ⬜ | 0% |
+| 4. Retrieval + chat | ✅ | 100% |
 | 5. Adaptive router | ⬜ | 0% |
 | 6. Eval + polish | ⬜ | 0% |
 | 7. Stretch | ⏸️ | — |

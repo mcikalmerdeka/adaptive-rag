@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from tenacity import (
 )
 
 from src.cache import OcrCache
+from src.config import settings
 from src.utils import iter_pdf_page_pngs
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class QwenParser:
         base_url: str = DEFAULT_BASE_URL,
         cache: OcrCache | None = None,
     ) -> None:
-        api_key = api_key or os.getenv("QWEN_API_KEY")
+        api_key = api_key or settings.QWEN_API_KEY
         if not api_key:
             raise QwenParserError(
                 "QWEN_API_KEY is not set. Add it to .env or pass api_key=..."
@@ -68,7 +68,7 @@ class QwenParser:
 
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
-        self._cache = cache or OcrCache()
+        self._cache = cache or OcrCache(settings.CACHE_DIR / "ocr")
 
     # ---- public API -----------------------------------------------------
 
@@ -181,7 +181,7 @@ class QwenParser:
 
     @staticmethod
     def is_configured() -> bool:
-        return bool(os.getenv("QWEN_API_KEY"))
+        return bool(settings.QWEN_API_KEY)
 
     def warm_up(self) -> None:
         """Sanity-ping. Does not call the model — just verifies client init."""

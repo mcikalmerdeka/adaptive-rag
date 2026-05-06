@@ -123,12 +123,12 @@
 
 | Component | Library | Why |
 |---|---|---|
-| Vector DB engine | `qdrant-client>=1.12` | Direct client for sparse vector config |
-| Sparse encoder | `fastembed>=0.4` | BM25 / SPLADE-light, runs locally |
-| Reranker | `sentence-transformers>=3.0` (BGE) **or** `cohere>=5.x` | Quality boost on top-k |
+| Vector DB engine | `qdrant-client>=1.12` ✅ | Direct client for sparse vector config |
+| Sparse encoder | `fastembed>=0.4` ✅ | BM25 / SPLADE-light, runs locally |
+| Reranker | `flashrank>=0.2.9` ✅ | Pure-ONNX cross-encoder (`ms-marco-MiniLM-L-12-v2` ~34 MB), no Torch — keeps the install lean and avoids the same Python-3.14 native-extension headaches we hit with `py-rust-stemmers` |
 | Eval | `ragas>=0.2`, `datasets` | Faithfulness, context precision/recall |
 | Tracing | `langfuse>=2.x` | LLM call traces, replaces ad-hoc logging |
-| HTTP retry | `tenacity>=9.x` | For Qwen API resilience |
+| HTTP retry | `tenacity>=9.x` ✅ | For Qwen API resilience |
 | SQL tool | `sqlalchemy>=2.x` | If/when SQL data source added |
 | (Optional) MCP | `mcp>=1.x` | Only if exposing tools to external clients |
 
@@ -385,12 +385,20 @@ Qdrant `query_points` with prefetch:
   - limit: 12
   │
   ▼
-Reranker (BGE-reranker-v2-m3 local OR cohere-rerank-3 API)
-  → top 5
+Reranker (FlashRank `ms-marco-MiniLM-L-12-v2` ONNX, local)
+  → top RERANK_TOP_K (default 5)
   │
   ▼
 Pass to LLM with header_path context
 ```
+
+> Originally we planned BGE-reranker-v2-m3 via `sentence-transformers`, but
+> swapped to FlashRank to avoid pulling in PyTorch + Transformers (heavy,
+> and on Python 3.14 native deps are still being shaken out — see the
+> `py-rust-stemmers` segfault we hit in Phase 3). FlashRank uses the same
+> ONNX runtime that `fastembed` already brings in, so no new native
+> dependency. Quality on English short-passage reranking is competitive
+> (within a couple of nDCG points of BGE on BEIR slices).
 
 Hybrid search (dense + sparse + RRF) typically buys you **+5-15% on retrieval recall** compared to pure dense. Reranker adds another **+10-20% on context precision**. These numbers are why the old doc's "dense only" recipe was leaving easy wins on the table.
 
@@ -615,13 +623,14 @@ Each phase ends with a working, demonstrable artifact and an eval run.
 - Docker compose with Qdrant
 - UI: ingest tab → upload → indexed confirmation
 
-### Phase 4 — Retrieval + reranker + simple chat (2-3 days)
-- `src/retrieval/hybrid_search.py`
-- `src/retrieval/reranker.py`
-- `src/synthesis/response.py`
-- `src/ui/chat_ui.py` — basic chat with citations
-- Build initial golden set (~20 Q&A)
-- First Ragas baseline
+### Phase 4 — Retrieval + reranker + simple chat (2-3 days) ✅
+- `src/config/settings.py` — single source of truth for all tunables
+- `src/retrieval/hybrid_search.py` — `HybridRetriever` + `RetrievalPipeline`
+- `src/retrieval/reranker.py` — FlashRank ONNX cross-encoder
+- `src/synthesis/response.py` — `GroundedAnswerer` (numbered context, inline `[n]` citations, refusal on out-of-context)
+- `src/ui/chat_ui.py` — Chat tab with sources panel + per-turn debug strip
+- _(deferred to Phase 6)_ Build initial golden set (~20 Q&A)
+- _(deferred to Phase 6)_ First Ragas baseline
 
 ### Phase 5 — Adaptive router (3-4 days)
 - `src/routing/adaptive_router.py`
@@ -656,7 +665,7 @@ Each phase ends with a working, demonstrable artifact and an eval run.
 | OCR | Qwen3-VL-Plus (API) | GLM-OCR (self-hosted), EasyOCR | No GPU needed, better quality on complex layouts, cheap per-image |
 | Vector DB | Qdrant | pgvector, Weaviate, Chroma | Best hybrid (dense + sparse) support, already pinned |
 | Sparse | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
-| Reranker | BGE-reranker-v2-m3 (local) | Cohere Rerank, ColBERT | Free, local, multilingual, ~80M params runs on CPU |
+| Reranker | FlashRank `ms-marco-MiniLM-L-12-v2` (local ONNX) | BGE-reranker-v2-m3 (heavy, needs Torch), Cohere Rerank (paid), ColBERT (no off-the-shelf cross-encoder) | Pure-ONNX runtime via `onnxruntime` (already pulled in by `fastembed`), ~34 MB model, no Torch / Transformers — avoids the Python-3.14 native-dep instability we already hit with `py-rust-stemmers` |
 | LLM router | gpt-4.1-nano OR qwen-turbo | gpt-4.1, claude | Cheap, fast, classification doesn't need frontier |
 | Tool protocol | Native function calling | MCP for everything | MCP only when external clients consume; one-agent app doesn't need it |
 | Task queue | `BackgroundTasks` | Celery + Redis | YAGNI — add when measured queue depth justifies |

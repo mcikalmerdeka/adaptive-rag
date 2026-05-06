@@ -4,7 +4,7 @@
 
 This project intelligently routes data and queries: documents go to a hybrid (dense + sparse) vector store, structured data is queried live via tools, and the LLM picks the right strategy *per query* — not per file extension.
 
-> Phased build. We're at **Phase 3** — full convert → chunk → hybrid index in Qdrant. Adaptive query routing comes in Phase 5.
+> Phased build. We're at **Phase 4** — full convert → chunk → hybrid index → retrieve → rerank → grounded chat. Adaptive query routing comes in Phase 5.
 
 See:
 - `ARCHITECTURE.md` — full system design and rationale
@@ -51,9 +51,20 @@ See:
   }
   ```
 
-- **Embedding cache** via LangChain's `CacheBackedEmbeddings` + `LocalFileStore` — every text+model combination is cached on disk.
+- **Embedding cache** via a tiny SHA256-keyed disk cache — every (text, model) pair is cached on disk so re-embedding the same chunk is free.
 - **Library view** in the UI — table of all indexed docs with a delete-by-doc-id action.
 - **Two backends, zero config:** if `QDRANT_URL` is set we connect to a remote/Docker/Cloud Qdrant; otherwise we run embedded out of `./qdrant_storage/`.
+
+### Phase 4 — Hybrid retrieval, reranker & grounded chat
+- **Hybrid retrieval** via Qdrant's native server-side RRF fusion of the named `dense` (OpenAI) and `sparse` (BM25 IDF) vectors — single round-trip, no client-side fusion code.
+- **Cross-encoder reranker** built on **FlashRank** (`ms-marco-MiniLM-L-12-v2`, ~34 MB ONNX, no PyTorch). Lazy first-use download; gracefully falls back to hybrid order if the model can't load.
+- **Grounded answers** via `langchain-openai`'s `ChatOpenAI` with a strict system prompt that requires inline `[n]` citations and refuses to invent facts. The chat layer parses the cited indices and surfaces only those in the **Sources** panel.
+- **All knobs in one place:** `src/config/settings.py` is the single source of truth. Override via `.env`:
+  - `RERANK_TOP_K=5` (final chunks shown to the LLM, default `5`)
+  - `RETRIEVAL_PREFETCH_K=25` (candidates fetched before reranking)
+  - `RERANKER_MODEL` (swap to `ms-marco-TinyBERT-L-2-v2` for speed or `rank-T5-flan` for quality)
+  - `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`
+  - `DENSE_MODEL`, `SPARSE_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, etc.
 
 ## Project structure
 
@@ -69,6 +80,8 @@ adaptive-rag/
 ├── scripts/
 │   └── init_qdrant.py              # Bootstrap or recreate the collection
 └── src/
+    ├── config/                     # Single source of truth for all tunables
+    │   └── settings.py             # reads .env once, exposes immutable Settings
     ├── core/                       # Document → markdown
     │   ├── file_detector.py
     │   ├── docling_parser.py
@@ -82,15 +95,21 @@ adaptive-rag/
     │   ├── embeddings.py           # dense (cached) + sparse (BM25)
     │   ├── qdrant_store.py         # hybrid collection + dedup + library
     │   └── pipeline.py             # convert → chunk → upsert
+    ├── retrieval/                  # Query → ranked chunks
+    │   ├── hybrid_search.py        # HybridRetriever + RetrievalPipeline
+    │   └── reranker.py             # FlashRank ONNX cross-encoder wrapper
+    ├── synthesis/                  # Chunks → grounded answer + citations
+    │   └── response.py             # GroundedAnswerer (ChatOpenAI)
     ├── cache/
     │   ├── ocr_cache.py            # SHA256 disk cache for OCR markdown
-    │   └── embedding_cache.py      # CacheBackedEmbeddings wrapper
+    │   └── embedding_cache.py      # SHA256 disk cache for embeddings
     ├── utils/
     │   └── pdf_inspector.py        # born-digital heuristic + page rendering
     └── ui/
         ├── main_ui.py              # Tab composition
-        ├── markdown_converter_ui.py # Convert tab
-        └── ingest_ui.py            # Ingest tab
+        ├── chat_ui.py              # Chat tab
+        ├── ingest_ui.py            # Ingest tab
+        └── markdown_converter_ui.py # Convert tab
 ```
 
 ## Setup
@@ -128,16 +147,18 @@ Open `http://localhost:7860`.
 
 ## Using the app
 
-**Convert tab** — single-document preview; pick a file, optionally force Qwen for PDFs, see the markdown and download.
+**Chat tab** — ask questions about your indexed documents. Each turn runs hybrid retrieval (dense + BM25 + RRF), reranks the top `RETRIEVAL_PREFETCH_K` candidates with a cross-encoder, and the LLM answers grounded in the top `RERANK_TOP_K` chunks (default 5). Inline `[n]` citations appear in the answer; the **Sources** panel on the right shows which chunks the LLM actually cited, with rerank scores. The footer line shows model + per-turn timings.
 
 **Ingest tab** — multi-file ingestion. Each file is converted → chunked → upserted into Qdrant. The library on the right shows what's currently indexed and lets you delete by `doc_id`. Re-ingesting a file by default replaces its previous chunks; tick **Skip if already indexed** to no-op instead.
+
+**Convert tab** — single-document preview; pick a file, optionally force Qwen for PDFs, see the markdown and download.
 
 ## Roadmap
 
 - ✅ Phase 1: Docling baseline document conversion
 - ✅ Phase 2: Parser router (Docling + Qwen3-VL fallback) with caching
 - ✅ Phase 3: Header-aware chunking + hybrid (dense + BM25) Qdrant indexing
-- ⬜ Phase 4: Hybrid retrieval (RRF fusion) + reranker + basic RAG chat
+- ✅ Phase 4: Hybrid retrieval + FlashRank reranker + grounded chat with citations
 - ⬜ Phase 5: **Adaptive query router** — `no_retrieval` / `vector_only` / `sql_only` / `hybrid` / `clarify` per query
 - ⬜ Phase 6: Ragas evaluation, Langfuse tracing, cost tracker
 - ⏸️ Phase 7: C-RAG self-reflection, MCP server surface, web fallback

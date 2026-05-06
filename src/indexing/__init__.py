@@ -1,23 +1,21 @@
 """Vector indexing layer (embeddings + Qdrant + ingestion pipeline)."""
 
-from .embeddings import (
-    DEFAULT_DENSE_MODEL,
-    DEFAULT_DENSE_SIZE,
-    DEFAULT_SPARSE_MODEL,
-    build_dense_embeddings,
-    build_sparse_embeddings,
-)
+from .embeddings import build_dense_embeddings, build_sparse_embeddings
 from .pipeline import IngestionPipeline, IngestionResult
-from .qdrant_store import QdrantStore, QdrantStoreError
+from .qdrant_store import (
+    DENSE_VECTOR_NAME,
+    SPARSE_VECTOR_NAME,
+    QdrantStore,
+    QdrantStoreError,
+)
 
 __all__ = [
-    "DEFAULT_DENSE_MODEL",
-    "DEFAULT_DENSE_SIZE",
-    "DEFAULT_SPARSE_MODEL",
-    "build_dense_embeddings",
-    "build_sparse_embeddings",
+    "DENSE_VECTOR_NAME",
     "IngestionPipeline",
     "IngestionResult",
     "QdrantStore",
     "QdrantStoreError",
+    "SPARSE_VECTOR_NAME",
+    "build_dense_embeddings",
+    "build_sparse_embeddings",
 ]

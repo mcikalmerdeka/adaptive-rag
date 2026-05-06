@@ -17,7 +17,7 @@ header-sensitive queries.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.documents import Document
@@ -25,6 +25,8 @@ from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
     RecursiveCharacterTextSplitter,
 )
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,10 @@ DEFAULT_HEADERS: list[tuple[str, str]] = [
 
 @dataclass
 class ChunkingConfig:
-    max_chunk_size: int = 1500
-    chunk_overlap: int = 200
+    """Tunable chunking parameters. Defaults pull from :mod:`src.config`."""
+
+    max_chunk_size: int = field(default_factory=lambda: settings.CHUNK_SIZE)
+    chunk_overlap: int = field(default_factory=lambda: settings.CHUNK_OVERLAP)
     headers: list[tuple[str, str]] | None = None
 
     def header_pairs(self) -> list[tuple[str, str]]:

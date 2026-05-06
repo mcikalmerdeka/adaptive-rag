@@ -13,7 +13,6 @@ Encapsulates:
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -23,17 +22,13 @@ from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient, models
 
 from src.chunking.metadata import chunk_uuid
+from src.config import settings
 
-from .embeddings import (
-    DEFAULT_DENSE_SIZE,
-    build_dense_embeddings,
-    build_sparse_embeddings,
-)
+from .embeddings import build_dense_embeddings, build_sparse_embeddings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_COLLECTION = "adaptive_rag"
-DEFAULT_LOCAL_PATH = "./qdrant_storage"
+# Internal field names — Qdrant payload keys; not user-facing tunables.
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 
@@ -54,19 +49,15 @@ class QdrantStore:
         path: str | Path | None = None,
         dense_embeddings: Embeddings | None = None,
         sparse_embeddings: FastEmbedSparse | None = None,
-        dense_size: int = DEFAULT_DENSE_SIZE,
+        dense_size: int | None = None,
     ) -> None:
-        self.collection_name = (
-            collection_name
-            or os.getenv("QDRANT_COLLECTION")
-            or DEFAULT_COLLECTION
-        )
-        self._dense_size = dense_size
+        self.collection_name = collection_name or settings.QDRANT_COLLECTION
+        self._dense_size = dense_size or settings.DENSE_SIZE
 
         self._client = self._build_client(
-            url=url or os.getenv("QDRANT_URL"),
-            api_key=api_key or os.getenv("QDRANT_API_KEY"),
-            path=path or os.getenv("QDRANT_PATH") or DEFAULT_LOCAL_PATH,
+            url=url or settings.QDRANT_URL,
+            api_key=api_key or settings.QDRANT_API_KEY,
+            path=path or settings.QDRANT_PATH,
         )
 
         self._dense = dense_embeddings or build_dense_embeddings()
@@ -85,7 +76,7 @@ class QdrantStore:
 
         logger.info(
             f"QdrantStore ready: collection='{self.collection_name}', "
-            f"backend='{self._backend_label}', dense_dim={dense_size}"
+            f"backend='{self._backend_label}', dense_dim={self._dense_size}"
         )
 
     # ---- public API ---------------------------------------------------
