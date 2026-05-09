@@ -1,8 +1,6 @@
 # AdaptiveRAG — Architecture
 
-**Hybrid Adaptive RAG with query-time strategy selection, markdown-first ingestion, and optional MCP tool surface.**
-
-> Supersedes `inspiration/intelligent_data_platform_documentation.md`. That doc was over-engineered for the actual goal: it routed at ingestion time (static dispatch) instead of query time (adaptive), used MCP as a generic microservice framework, and pulled in CDC/Celery/Redis without a real driver. This document is the lean replacement.
+A hybrid Adaptive RAG system. Each query is classified at runtime into one of five execution strategies (`no_retrieval`, `vector_only`, `sql_only`, `hybrid`, `clarify`) and dispatched to the right backend(s). Documents flow through a markdown-first ingestion pipeline; the retrieval layer is hybrid (dense + BM25 + cross-encoder rerank); the SQL layer is read-only with defense in depth.
 
 ---
 
@@ -15,42 +13,45 @@
 5. [Project Structure](#5-project-structure)
 6. [Ingestion Pipeline](#6-ingestion-pipeline)
 7. [Chunking Strategy](#7-chunking-strategy)
-8. [Retrieval Layer (Hybrid Search + Rerank)](#8-retrieval-layer-hybrid-search--rerank)
-9. [Adaptive Query Router (The Actual Brain)](#9-adaptive-query-router-the-actual-brain)
-10. [Tool Layer (SQL + Optional MCP)](#10-tool-layer-sql--optional-mcp)
-11. [Evaluation Framework](#11-evaluation-framework)
+8. [Retrieval Layer](#8-retrieval-layer)
+9. [Adaptive Query Router](#9-adaptive-query-router)
+10. [Tool Layer (Read-Only SQL)](#10-tool-layer-read-only-sql)
+11. [Synthesis & Citations](#11-synthesis--citations)
 12. [Caching & Cost Control](#12-caching--cost-control)
-13. [Phased Implementation Plan](#13-phased-implementation-plan)
-14. [Decision Log](#14-decision-log)
-15. [Open Questions](#15-open-questions)
+13. [Configuration](#13-configuration)
+14. [Implementation Status](#14-implementation-status)
+15. [Decision Log](#15-decision-log)
+16. [Future Work](#16-future-work)
 
 ---
 
 ## 1. Goals & Non-Goals
 
 ### Goals
-- **Adaptive retrieval** — pick `no-retrieval | vector | sql-tool | hybrid` per-query, not per-file-extension.
-- **Markdown-first ingestion** — convert everything to markdown via Docling so chunks are header-aware.
-- **Hybrid retrieval at the index layer** — dense embeddings + sparse (BM25) + reranker.
-- **Honest evaluation** — Ragas metrics on a small golden set from day one.
-- **Cost-bounded** — cache OCR and embeddings by content hash; track per-query cost.
-- **Portfolio-presentable** — clean code, working demo, real metrics.
+
+- **Adaptive retrieval** — pick the right strategy per-query, not per-file-extension.
+- **Markdown-first ingestion** — convert every input format to markdown so chunks are header-aware.
+- **Hybrid retrieval at the index layer** — dense embeddings + BM25 + reciprocal-rank fusion + cross-encoder reranker.
+- **Grounded answers with citations** — inline `[n]` markers for chunks, `[DB]` for SQL data, parsed back into structured citations for the UI.
+- **Cost-bounded** — content-hash caches for OCR and embeddings; cheap models for routing, frontier models only for synthesis.
+- **Portfolio-presentable** — clean code, working demo, real metrics in Phase 6.
 
 ### Non-Goals
+
 - Multi-tenant SaaS with RBAC.
-- Real-time CDC / database mirroring into vectors.
-- Distributed task queue (Celery/Redis) — `FastAPI BackgroundTasks` is enough until proven otherwise.
-- 4 separate MCP servers — one optional MCP surface that wraps the same tools.
-- Production monitoring (Prometheus/Grafana) — Langfuse for traces is enough.
+- Real-time CDC / database mirroring into vectors. (See decision log: never embed structured data.)
+- Distributed task queue. `FastAPI BackgroundTasks` is enough until proven otherwise.
+- A constellation of MCP servers. One optional MCP surface that wraps the same tools is enough.
+- Production monitoring stack (Prometheus / Grafana / Jaeger). Langfuse for traces is enough.
 
 ---
 
 ## 2. Core Principles
 
-1. **If the answer is a sentence → embed it. If the answer is a number → query it.** (Original principle, kept.)
-2. **Decide adaptively at query time, not at ingest time.** A PDF can contain prose *and* tables; a SQL DB row can have a free-text comment column. Routing happens after we read the question, not when the file lands on disk.
+1. **If the answer is a sentence, embed it. If the answer is a number, query it.** Free text goes to vectors; structured data stays in SQL.
+2. **Decide adaptively at query time, not at ingest time.** A PDF can contain prose *and* tables; a SQL row can have a free-text comment. Routing has to see the question, not just the file.
 3. **Markdown is the universal intermediate format.** Every parser output normalizes to markdown before chunking.
-4. **Quality of parsing > quantity of features.** One excellent ingestion path beats five mediocre ones.
+4. **Quality of parsing beats quantity of features.** One excellent ingestion path is better than five mediocre ones.
 5. **Measure before optimizing.** No reranker, no advanced chunking, no MCP — until eval scores justify each addition.
 
 ---
@@ -59,46 +60,43 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         INGESTION (Offline)                           │
+│                         INGESTION (offline)                           │
 │                                                                       │
-│  File ──▶ FileTypeDetector ──▶ Parser ──▶ Markdown ──▶ Chunker        │
-│                                  │                                     │
-│                                  ├─ Docling (default)                  │
-│                                  ├─ Qwen3-VL (image / scanned PDF)     │
-│                                  └─ passthrough (.md, .txt)            │
+│  File ─► FileTypeDetector ─► ParserRouter ─► Markdown ─► Chunker      │
+│                                  │                                    │
+│                                  ├─ Docling          (default)        │
+│                                  ├─ Qwen3-VL         (image / scan)   │
+│                                  └─ passthrough      (.md, .txt)      │
 │                                                                       │
-│  Markdown ──▶ MarkdownHeaderSplitter ──▶ Embedder ──▶ Qdrant          │
-│                                            │                           │
-│                                            ├─ Dense (text-emb-3-small) │
-│                                            └─ Sparse (BM25 / SPLADE)   │
+│  Markdown ─► MarkdownHeaderSplitter ─► Embedder ─► Qdrant             │
+│                                            │                          │
+│                                            ├─ dense  (text-emb-3)     │
+│                                            └─ sparse (BM25 / IDF)     │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────┐
-│                       QUERY-TIME (Online)                             │
+│                         QUERY-TIME (online)                           │
 │                                                                       │
-│   User Query                                                          │
+│   user query                                                          │
 │       │                                                               │
 │       ▼                                                               │
 │  ┌──────────────────────┐                                             │
-│  │ Adaptive Router      │  (cheap LLM classifier)                     │
-│  │  → strategy: A/B/C/D │                                             │
-│  └──────┬───────────────┘                                             │
-│         │                                                             │
-│   ┌─────┼──────────────┬─────────────┬────────────────┐               │
-│   ▼     ▼              ▼             ▼                ▼               │
-│  none  vector        sql-tool      hybrid           clarify           │
-│         │              │             │                                │
-│         ▼              ▼             ▼                                │
-│   Qdrant hybrid     SQL via       both, then                          │
-│    + Reranker       function-call synthesize                          │
-│         │              │             │                                │
-│         └──────────────┴─────────────┘                                │
-│                        │                                              │
-│                        ▼                                              │
-│                  Response Synthesizer                                 │
-│                        │                                              │
-│                        ▼                                              │
-│                     Answer + Citations                                │
+│  │ AdaptiveRouter       │   cheap LLM classifier                      │
+│  │  → strategy + intent │   (gpt-4.1-nano default)                    │
+│  └────────┬─────────────┘                                             │
+│           │                                                           │
+│   ┌───────┼───────────┬─────────────┬────────────────┐                │
+│   ▼       ▼           ▼             ▼                ▼                │
+│ no_retr.  vector    sql_only      hybrid          clarify             │
+│  (LLM)   ↓ Qdrant   ↓ NL→SQL     ↓ both           (ask user)          │
+│          ↓ + rerank ↓ + execute  ↓ + merge                            │
+│           └──────────┴────────────┘                                   │
+│                      │                                                │
+│                      ▼                                                │
+│             GroundedAnswerer (LLM)                                    │
+│                      │                                                │
+│                      ▼                                                │
+│        answer with [n] / [DB] citations                               │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -106,114 +104,101 @@
 
 ## 4. Tech Stack
 
-### Already in `pyproject.toml` (keep)
-
-| Component | Library | Notes |
+| Component | Library | Role |
 |---|---|---|
-| Document parsing | `docling>=2.92` | Primary, handles PDF/DOCX/PPTX/XLSX/HTML/images |
-| LLM framework | `langchain>=1.2` + `langchain-core` | v1.x — current API |
-| Embeddings client | `langchain-openai>=1.2` | OpenAI SDK |
-| Vector store | `langchain-qdrant>=1.1` | Hybrid (dense + sparse) supported |
-| Splitters | `langchain-text-splitters>=1.1` | `MarkdownHeaderTextSplitter` lives here |
-| UI | `gradio>=6.13` | Demo UI |
-| OpenAI SDK | `openai>=2.33` | Also used for Qwen via DashScope OpenAI-compat endpoint |
-| Env | `python-dotenv>=1.2` | |
+| Document parsing | `docling>=2.92` | Born-digital PDFs, DOCX, PPTX, XLSX, HTML, CSV |
+| OCR | `openai>=2.33` against DashScope OpenAI-compat endpoint | Qwen3-VL-Plus for images and scanned PDFs |
+| LLM framework | `langchain>=1.2`, `langchain-core>=1.3` | Message types, prompts, structured output |
+| LLM client | `langchain-openai>=1.2` | Chat synthesis, router, NL→SQL |
+| Embeddings — dense | `langchain-openai` + `text-embedding-3-small` | 1536-dim, with SHA256 disk cache |
+| Embeddings — sparse | `fastembed>=0.4` (`Qdrant/bm25`) | Local BM25 with IDF, no GPU |
+| Vector DB | `qdrant-client>=1.12` + `langchain-qdrant>=1.1` | Hybrid collection (dense + sparse named vectors) |
+| Reranker | `flashrank>=0.2.9` | Pure-ONNX cross-encoder (`ms-marco-MiniLM-L-12-v2`, ~34 MB) |
+| Splitters | `langchain-text-splitters>=1.1` | Header-aware + recursive fallback |
+| PDF inspection | `pypdfium2>=4.30` | Born-digital heuristic + page rendering |
+| Schema validation | `pydantic>=2.9` | Structured router output, structured NL→SQL |
+| SQL | `sqlalchemy>=2.0.36` + `psycopg[binary]>=3.2.3` | Read-only Postgres tool |
+| Retry | `tenacity>=9.x` | Qwen API resilience |
+| UI | `gradio>=6.13` | Tabbed Chat / Ingest / Convert demo |
+| Env | `python-dotenv>=1.2` | `.env` config loader |
 
-### To add
+### Explicitly avoided
 
-| Component | Library | Why |
-|---|---|---|
-| Vector DB engine | `qdrant-client>=1.12` ✅ | Direct client for sparse vector config |
-| Sparse encoder | `fastembed>=0.4` ✅ | BM25 / SPLADE-light, runs locally |
-| Reranker | `flashrank>=0.2.9` ✅ | Pure-ONNX cross-encoder (`ms-marco-MiniLM-L-12-v2` ~34 MB), no Torch — keeps the install lean and avoids the same Python-3.14 native-extension headaches we hit with `py-rust-stemmers` |
-| Eval | `ragas>=0.2`, `datasets` | Faithfulness, context precision/recall |
-| Tracing | `langfuse>=2.x` | LLM call traces, replaces ad-hoc logging |
-| HTTP retry | `tenacity>=9.x` ✅ | For Qwen API resilience |
-| SQL tool | `sqlalchemy>=2.0.36` + `psycopg[binary]>=3.2.3` ✅ | Read-only NL→SQL over Postgres with safety guards |
-| (Optional) MCP | `mcp>=1.x` | Only if exposing tools to external clients |
-
-### To explicitly *not* add
-
-- ~~`celery`, `redis`~~ — use `FastAPI BackgroundTasks`
-- ~~`watchdog`~~ — explicit upload via UI/API is fine
-- ~~`transformers`, `torch`, `accelerate`~~ — Qwen is API-based now
-- ~~`debezium` / CDC~~ — query DB live via tool, never sync
-- ~~Prometheus/Grafana stack~~ — Langfuse covers it for v1
+- `celery`, `redis` — not needed; `FastAPI BackgroundTasks` is sufficient.
+- `transformers`, `torch`, `accelerate` — Qwen is API-based and FlashRank uses ONNX. Keeps the install lean and dodges Python-3.14 native-extension instability.
+- `watchdog` — explicit upload via UI/API is fine.
+- CDC tooling (Debezium et al.) — query DB live via tool, never sync.
+- Prometheus / Grafana — Langfuse covers it for v1.
 
 ---
 
 ## 5. Project Structure
 
-Evolving from current state. Files marked `[exists]` are already implemented; `[new]` are planned.
-
 ```
 adaptive-rag/
-├── app.py                          [exists] Gradio entry point
-├── pyproject.toml                  [exists]
-├── ARCHITECTURE.md                 [this file]
-├── README.md                       [exists, will update post Phase 2]
+├── app.py                          Gradio entry point
+├── pyproject.toml
+├── docker-compose.yml              Qdrant + Postgres
+├── .env.example
+├── ARCHITECTURE.md                 (this file)
+├── README.md
+├── PROJECT_PLAN.md                 Phase-by-phase status
+├── scripts/
+│   ├── init_qdrant.py              Create / recreate the Qdrant collection
+│   └── seed_demo_data.py           Seed Postgres with demo e-commerce data
 │
 ├── src/
-│   ├── core/
-│   │   ├── file_detector.py        [exists]
-│   │   ├── converter.py            [exists] Docling-based MD converter
-│   │   ├── ocr_qwen.py             [new] Qwen3-VL fallback OCR
-│   │   └── parser_router.py        [new] Picks Docling vs Qwen per file
+│   ├── config/
+│   │   └── settings.py             Single source of truth for all tunables
 │   │
-│   ├── chunking/
-│   │   ├── markdown_chunker.py     [new] Header-aware + recursive fallback
-│   │   └── metadata.py             [new] header_path, doc_id, hash
+│   ├── core/                       Document → markdown
+│   │   ├── file_detector.py        Format detection + validation
+│   │   ├── docling_parser.py       Docling-backed parser
+│   │   ├── qwen_parser.py          Qwen3-VL OCR with retry + cache
+│   │   ├── parser_router.py        Picks Docling vs Qwen per file
+│   │   └── converter.py            Public conversion API
 │   │
-│   ├── indexing/
-│   │   ├── embeddings.py           [new] Dense + sparse encoders
-│   │   ├── qdrant_store.py         [new] Hybrid collection setup
-│   │   └── deduplication.py        [new] Content-hash dedup
+│   ├── chunking/                   Markdown → header-aware chunks
+│   │   ├── markdown_chunker.py     Header splitter + recursive fallback
+│   │   └── metadata.py             doc_id (SHA256), chunk_uuid (UUID5)
 │   │
-│   ├── retrieval/
-│   │   ├── hybrid_search.py        [new] Fusion of dense + BM25
-│   │   ├── reranker.py             [new] BGE / Cohere
-│   │   └── citations.py            [new] Map chunks → source spans
+│   ├── indexing/                   Chunks → Qdrant
+│   │   ├── embeddings.py           Dense (cached) + BM25 sparse
+│   │   ├── qdrant_store.py         Hybrid collection + dedup + library
+│   │   └── pipeline.py             Convert → chunk → upsert
 │   │
-│   ├── routing/
-│   │   ├── adaptive_router.py      [new] THE adaptive bit
-│   │   ├── strategies.py           [new] no-retrieval | vector | sql | hybrid
-│   │   └── prompts.py              [new] Router system prompts
+│   ├── retrieval/                  Query → ranked chunks
+│   │   ├── hybrid_search.py        HybridRetriever + RetrievalPipeline
+│   │   └── reranker.py             FlashRank ONNX cross-encoder
 │   │
-│   ├── tools/
-│   │   ├── sql_tool.py             [new] Read-only SQL via function call
-│   │   └── registry.py             [new] Tool schema for LLM
+│   ├── routing/                    Adaptive router + dispatcher
+│   │   ├── strategies.py           Strategy StrEnum + capability sets
+│   │   ├── prompts.py              Router system prompt + few-shots
+│   │   ├── adaptive_router.py      LLM classifier (structured output)
+│   │   └── dispatcher.py           Compose router + retrieval + SQL + synthesis
 │   │
-│   ├── synthesis/
-│   │   └── response.py             [new] Combine context + tool results
+│   ├── tools/                      External tools the dispatcher can call
+│   │   └── sql_tool.py             Read-only NL→SQL with safety guards
 │   │
-│   ├── cache/
-│   │   ├── ocr_cache.py            [new] SHA256-keyed disk cache
-│   │   └── embedding_cache.py      [new] Same idea for embeddings
+│   ├── synthesis/                  Chunks (+ SQL) → grounded answer
+│   │   └── response.py             GroundedAnswerer + Citation parsing
 │   │
-│   ├── eval/
-│   │   ├── golden.jsonl            [new] ~30 Q&A pairs to start
-│   │   ├── ragas_runner.py         [new]
-│   │   └── reports/                [new] HTML eval reports
+│   ├── cache/                      Content-hash caches
+│   │   ├── ocr_cache.py            SHA256-keyed disk cache for OCR markdown
+│   │   └── embedding_cache.py      SHA256-keyed disk cache for vectors
 │   │
-│   ├── observability/
-│   │   ├── langfuse_client.py      [new]
-│   │   └── cost_tracker.py         [new] $ per query, per ingest
+│   ├── utils/
+│   │   └── pdf_inspector.py        Born-digital heuristic + page rendering
 │   │
-│   ├── ui/
-│   │   ├── markdown_converter_ui.py    [exists] Step 1 UI
-│   │   ├── ingest_ui.py            [new] Upload → index
-│   │   └── chat_ui.py              [new] Query interface
-│   │
-│   └── mcp_server/                 [optional, Phase 5]
-│       └── server.py               Expose tools to Cursor/Claude Desktop
+│   └── ui/                         Gradio interface
+│       ├── main_ui.py              Tab composition
+│       ├── chat_ui.py              Chat tab (calls AdaptiveDispatcher)
+│       ├── ingest_ui.py            Ingest tab (multi-file upload + library)
+│       └── markdown_converter_ui.py  Convert tab (single-document preview)
 │
-├── tests/
-│   ├── test_chunking.py
-│   ├── test_routing.py
-│   ├── test_retrieval.py
-│   └── fixtures/
-│
-└── docker-compose.yml              Qdrant only (postgres if SQL demo added)
+└── docs/
+    ├── check_postgres.md           DB inspection cheatsheet
+    └── check_qdrant.md             Vector DB inspection cheatsheet
 ```
 
 ---
@@ -224,70 +209,39 @@ adaptive-rag/
 
 ```
 file_type ──┐
-            ├── .md / .txt ─────────────────► passthrough
+            ├── .md / .txt ──────────────────► passthrough
             │
-            ├── .pdf ──┬─ "born-digital" ───► Docling (fast, text layer)
-            │         └─ "scanned"  ────────► Qwen3-VL (vision)
+            ├── .pdf ──┬─ "born-digital" ───► Docling   (fast, text layer)
+            │         └─ "scanned"  ────────► Qwen3-VL  (vision)
             │
-            ├── .docx / .pptx / .xlsx / .html ► Docling
+            ├── .docx / .pptx / .xlsx / .html / .csv ──► Docling
             │
-            └── .png / .jpg / .tiff / .webp ──► Qwen3-VL (better than EasyOCR)
+            └── .png / .jpg / .webp ──► Qwen3-VL  (better than Tesseract on layout)
 ```
 
-**How to decide born-digital vs scanned for PDFs:**
+The "born-digital vs scanned" decision for PDFs is a cheap heuristic: render the text layer of the first three pages and treat the file as scanned if the total extracted character count is below a small threshold. Docling has its own internal OCR fallback (EasyOCR / Tesseract); the heuristic lets us skip that path and use Qwen3-VL when accuracy matters.
 
-```python
-def _is_scanned(pdf_path: Path) -> bool:
-    """Heuristic: if first N pages have <50 chars of extractable text, treat as scanned."""
-    import pypdf
-    reader = pypdf.PdfReader(pdf_path)
-    sample_pages = reader.pages[:3]
-    total_text = sum(len(p.extract_text() or "") for p in sample_pages)
-    return total_text < 150
-```
+The user can override this routing per-file with a "Force Qwen3-VL OCR for PDFs" toggle in the Convert tab.
 
-Cheap, deterministic, good-enough heuristic. Docling internally does OCR fallback too; this just lets us skip Docling's OCR (EasyOCR/Tesseract) and use Qwen3-VL when accuracy matters.
+### Qwen3-VL OCR
 
-### Qwen3-VL OCR (replaces GLM-OCR from old doc)
+Calls the DashScope OpenAI-compatible endpoint. The OCR prompt is intentionally deterministic:
 
-```python
-# src/core/ocr_qwen.py
-import base64, hashlib, os
-from pathlib import Path
-from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+> Extract all text from this image into clean GitHub-flavored Markdown. Preserve table structure with pipe syntax. Preserve heading hierarchy. Do not summarize, do not add commentary. If text is illegible, write `[illegible]`.
 
-class QwenOCR:
-    def __init__(self):
-        self._client = OpenAI(
-            api_key=os.getenv("QWEN_API_KEY"),
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        )
+`tenacity` handles transient API failures with exponential backoff. The result is content-hash cached so re-uploading the same file (or re-rendering the same page from a multi-page PDF) never spends a second API call.
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-    def extract(self, image_path: Path) -> str:
-        b64 = base64.b64encode(image_path.read_bytes()).decode()
-        suffix = image_path.suffix.lstrip(".").lower()
-        completion = self._client.chat.completions.create(
-            model="qwen3-vl-plus",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/{suffix};base64,{b64}"}},
-                    {"type": "text", "text": OCR_PROMPT},
-                ],
-            }],
-        )
-        return completion.choices[0].message.content
-```
+### Content-hash everything
 
-`OCR_PROMPT` should be deterministic and explicit:
+Three things use SHA256 as a primary key:
 
-> "Extract all text from this image into clean GitHub-flavored Markdown. Preserve table structure with pipe syntax. Preserve heading hierarchy. Do not summarize. Do not add commentary. If text is illegible, write `[illegible]`."
+| Cache | Key | Stored |
+|---|---|---|
+| OCR | `sha256(image_bytes)` | Markdown text on disk |
+| Embeddings | `sha256(model_name + text)` | Raw `float32` vector bytes on disk |
+| Documents | `sha256(file_bytes)[:16]` | `doc_id` for dedup + library listing |
 
-### Content-hash caching
-
-Every parsed output is keyed by `sha256(file_bytes)`. Re-uploading the same scanned PDF should never call Qwen twice. See [§12 Caching](#12-caching--cost-control).
+Re-ingesting the same file replaces its prior chunks in Qdrant atomically (delete-by-`doc_id` then upsert).
 
 ---
 
@@ -295,402 +249,314 @@ Every parsed output is keyed by `sha256(file_bytes)`. Re-uploading the same scan
 
 Two-pass:
 
-1. **`MarkdownHeaderTextSplitter`** — split by `#`, `##`, `###`. Inject the header path into chunk metadata.
-2. **`RecursiveCharacterTextSplitter`** — fallback for any header-section that exceeds `max_chunk_size` (e.g. 1500 chars). Inherits the parent header_path.
+1. **`MarkdownHeaderTextSplitter`** splits by `#`, `##`, `###`. Headers are kept in the chunk content and the header path is also written to chunk metadata.
+2. **`RecursiveCharacterTextSplitter`** splits any header-section that exceeds `CHUNK_SIZE` (default 1500 chars). Each sub-chunk inherits the parent's header path.
 
-```python
-# src/chunking/markdown_chunker.py
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+### Per-chunk metadata
 
-HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3")]
-header_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=HEADERS, strip_headers=False)
-recursive_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1500, chunk_overlap=200,
-    separators=["\n\n", "\n", ". ", " ", ""],
-)
-
-def chunk_markdown(md: str, doc_id: str) -> list[Document]:
-    header_chunks = header_splitter.split_text(md)
-    out = []
-    for hc in header_chunks:
-        # header_path = "h1 > h2 > h3" string
-        path = " > ".join(v for k, v in hc.metadata.items() if k.startswith("h"))
-        if len(hc.page_content) <= 1500:
-            hc.metadata["header_path"] = path
-            hc.metadata["doc_id"] = doc_id
-            out.append(hc)
-        else:
-            for sub in recursive_splitter.split_text(hc.page_content):
-                out.append(Document(
-                    page_content=sub,
-                    metadata={**hc.metadata, "header_path": path, "doc_id": doc_id},
-                ))
-    return out
-```
-
-**Metadata schema per chunk:**
-
-```python
+```json
 {
-  "doc_id": "sha256(file)[:16]",
-  "source": "data/policy.pdf",
-  "filename": "policy.pdf",
-  "header_path": "Refund Policy > Eligibility",
-  "chunk_index": 7,
-  "total_chunks": 23,
-  "ingested_at": "2026-05-06T03:50:00Z",
-  "parser": "docling" | "qwen3-vl" | "passthrough",
+  "doc_id":        "dc7c3912cd0b003d",
+  "source":        "data/policy.pdf",
+  "filename":      "policy.pdf",
+  "header_path":   "Refund Policy > Eligibility",
+  "chunk_index":   7,
+  "total_chunks":  23,
+  "ingested_at":   "2026-05-09T04:52:24+00:00",
+  "parser":        "docling"      // or "qwen3-vl" or "passthrough"
 }
 ```
 
-No `access_level`, `department`, `tags` etc. for v1 — add only when a feature needs them.
+`chunk_uuid` is generated deterministically via `UUID5(doc_id, chunk_index)` so re-upserts are idempotent.
+
+No `access_level` / `department` / `tags` in v1 — those go in only when a feature actually consumes them.
 
 ---
 
-## 8. Retrieval Layer (Hybrid Search + Rerank)
+## 8. Retrieval Layer
 
 ### Qdrant collection: hybrid by default
 
 ```python
-# src/indexing/qdrant_store.py
-from qdrant_client import QdrantClient, models
-
-COLL = "adaptive_rag"
-
-def init_collection(client: QdrantClient, dense_size: int = 1536):
-    client.create_collection(
-        collection_name=COLL,
-        vectors_config={
-            "dense": models.VectorParams(size=dense_size, distance=models.Distance.COSINE),
-        },
-        sparse_vectors_config={
-            "bm25": models.SparseVectorParams(modifier=models.Modifier.IDF),
-        },
-    )
+client.create_collection(
+    collection_name="adaptive_rag",
+    vectors_config={
+        "dense": models.VectorParams(size=1536, distance=models.Distance.COSINE),
+    },
+    sparse_vectors_config={
+        "bm25": models.SparseVectorParams(modifier=models.Modifier.IDF),
+    },
+)
 ```
+
+Both vectors are populated for every chunk at ingest time; queries hit both.
 
 ### Query flow
 
 ```
 query
   │
-  ├─► dense embedding (text-embedding-3-small)
-  ├─► sparse encoding (FastEmbed BM25)
+  ├─► dense embedding   (text-embedding-3-small, cached)
+  ├─► sparse encoding   (FastEmbed BM25, IDF on server)
   │
   ▼
 Qdrant `query_points` with prefetch:
-  - prefetch dense (top 25)
-  - prefetch sparse (top 25)
-  - fusion: RRF
-  - limit: 12
+  - prefetch dense  (top RETRIEVAL_PREFETCH_K = 25)
+  - prefetch sparse (top RETRIEVAL_PREFETCH_K = 25)
+  - fusion: server-side RRF
   │
   ▼
-Reranker (FlashRank `ms-marco-MiniLM-L-12-v2` ONNX, local)
-  → top RERANK_TOP_K (default 5)
+FlashRank cross-encoder rerank
+  → top RERANK_TOP_K = 5
   │
   ▼
-Pass to LLM with header_path context
+Pass to GroundedAnswerer with header_path context
 ```
 
-> Originally we planned BGE-reranker-v2-m3 via `sentence-transformers`, but
-> swapped to FlashRank to avoid pulling in PyTorch + Transformers (heavy,
-> and on Python 3.14 native deps are still being shaken out — see the
-> `py-rust-stemmers` segfault we hit in Phase 3). FlashRank uses the same
-> ONNX runtime that `fastembed` already brings in, so no new native
-> dependency. Quality on English short-passage reranking is competitive
-> (within a couple of nDCG points of BGE on BEIR slices).
+The fusion is server-side RRF (Qdrant native), not client-side merging — single round-trip per query.
 
-Hybrid search (dense + sparse + RRF) typically buys you **+5-15% on retrieval recall** compared to pure dense. Reranker adds another **+10-20% on context precision**. These numbers are why the old doc's "dense only" recipe was leaving easy wins on the table.
+The reranker uses `ms-marco-MiniLM-L-12-v2` by default (~34 MB ONNX). Lazy first-use download to `CACHE_DIR/flashrank/`. If model loading or scoring fails, the pipeline gracefully falls back to the hybrid-fusion order. Alternatives configurable via `RERANKER_MODEL`:
+
+| Model | Size | Notes |
+|---|---|---|
+| `ms-marco-TinyBERT-L-2-v2` | ~4 MB | Fastest |
+| `ms-marco-MiniLM-L-12-v2` | ~34 MB | **Default** — balanced |
+| `ms-marco-MultiBERT-L-12` | ~150 MB | Multilingual |
+| `rank-T5-flan` | ~110 MB | Best quality |
+
+Hybrid search typically yields **+5–15% retrieval recall** over pure dense; reranking adds another **+10–20% context precision** on top. Numbers will be re-validated against the golden set in Phase 6.
 
 ---
 
-## 9. Adaptive Query Router (The Actual Brain)
+## 9. Adaptive Query Router
 
-This is what makes the project actually "Adaptive RAG" (per Jeong et al., 2024 — query-complexity-aware strategy selection), not just static dispatch.
+The router is what makes this *Adaptive RAG* (per Jeong et al., 2024 — query-complexity-aware strategy selection) rather than static dispatch.
 
 ### Strategies
 
-| ID | Name | When | Cost | Latency |
-|---|---|---|---|---|
-| `A` | `no_retrieval` | Greeting, chitchat, generic question | $ | low |
-| `B` | `vector_only` | Conceptual / "what does X mean" / policy lookup | $$ | low |
-| `C` | `sql_only` | Quantitative / "how many" / "what's the total" | $$ | low |
-| `D` | `hybrid` | Mixed — needs both context and live numbers | $$$ | high |
-| `E` | `clarify` | Ambiguous; ask user | $ | low |
-
-### Implementation
-
-```python
-# src/routing/adaptive_router.py
-from pydantic import BaseModel
-from typing import Literal
-
-class RouteDecision(BaseModel):
-    strategy: Literal["no_retrieval", "vector_only", "sql_only", "hybrid", "clarify"]
-    rationale: str
-    rewritten_query: str | None = None  # optional query rewrite for retrieval
-    sql_hint: str | None = None         # optional table/column hint for SQL tool
-
-ROUTER_PROMPT = """\
-You are a query router. Classify the user's query into ONE strategy:
-
-- no_retrieval: greeting, chitchat, math, code generation that needs no docs/data
-- vector_only: conceptual, policy, "what is", "how does", "explain"
-- sql_only: numeric, aggregation, "how many", "total", "average", time-bounded counts
-- hybrid: needs both context AND live numbers (e.g. "what's our refund policy and how many last month")
-- clarify: ambiguous, missing context, multiple possible interpretations
-
-Output strict JSON matching the schema. Rewrite the query for retrieval if useful (e.g. expand acronyms).
-"""
-
-def route(query: str, llm) -> RouteDecision:
-    # Use a cheap fast model: gpt-4.1-nano or qwen-turbo
-    return llm.with_structured_output(RouteDecision).invoke([
-        {"role": "system", "content": ROUTER_PROMPT},
-        {"role": "user", "content": query},
-    ])
-```
-
-### Self-Reflection Loop (optional Phase 4)
-
-After initial retrieval, run a grading step:
-
-```
-relevance_score = grader_llm("Is this context relevant to the query?", chunks, query)
-if relevance_score < threshold:
-    # Try web search, or expand to different collections, or escalate to hybrid
-    fallback_strategy(...)
-```
-
-This is the C-RAG (Corrective RAG) pattern. Add it only after eval shows base routing is solid.
-
----
-
-## 10. Tool Layer (SQL + Optional MCP)
-
-### Default: native function calling, NO MCP
-
-For the agent's own tools, use OpenAI/Anthropic function calling directly. MCP adds protocol overhead with no payoff when there's exactly one client (your own agent).
-
-```python
-# src/tools/sql_tool.py
-from langchain_core.tools import tool
-from sqlalchemy import create_engine, text
-
-_engine = create_engine(os.getenv("DATABASE_URL"))
-
-@tool
-def query_sales(sql: str) -> str:
-    """Run a READ-ONLY SQL query against the sales DB.
-    Allowed tables: orders, refunds, customers.
-    Must be a single SELECT. No DDL, DML, or comments."""
-    if not _is_safe_select(sql):
-        return "ERROR: only single SELECT statements allowed"
-    with _engine.connect() as conn:
-        rows = conn.execute(text(sql)).mappings().all()
-    return json.dumps([dict(r) for r in rows[:100]], default=str)
-```
-
-`_is_safe_select` — simple guardrail: must start with `SELECT`, no `;` (single statement), regex blocklist for `INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT`. Run as a read-only DB user regardless.
-
-### Optional: MCP surface (Phase 5, only if you want it)
-
-Expose the same tools as an MCP server so Cursor / Claude Desktop can use them too:
-
-```python
-# src/mcp_server/server.py
-from mcp.server.fastmcp import FastMCP
-from src.tools.sql_tool import query_sales
-
-mcp = FastMCP("adaptive-rag")
-
-@mcp.tool()
-def search_docs(query: str) -> str:
-    """Hybrid vector + BM25 search across ingested documents."""
-    return run_hybrid_search(query)
-
-@mcp.tool()
-def query_sales_db(sql: str) -> str:
-    return query_sales.invoke({"sql": sql})
-```
-
-This is the *correct* use of MCP: making the same capabilities reusable across LLM clients. Not as a microservice framework.
-
----
-
-## 11. Evaluation Framework
-
-Eval-first development. Build the golden set *before* tuning chunk size or swapping rerankers.
-
-### Golden set (`src/eval/golden.jsonl`)
-
-```json
-{"query": "What is our refund policy?", "expected_strategy": "vector_only", "expected_answer_contains": ["14 days", "original payment method"], "expected_sources": ["policy.pdf"]}
-{"query": "How many refunds did we process last month?", "expected_strategy": "sql_only", "expected_answer_contains": ["1,247"]}
-{"query": "Hi how are you", "expected_strategy": "no_retrieval"}
-{"query": "What's our hiring policy and how many people did we hire in Q4?", "expected_strategy": "hybrid"}
-```
-
-Aim for **30-50 examples** spanning all 5 strategies, edge cases, and adversarial queries.
-
-### Ragas metrics (per query)
-
-| Metric | What it measures | Target |
+| Strategy | When | Touches |
 |---|---|---|
-| `faithfulness` | Answer grounded in retrieved context | >0.85 |
-| `answer_relevancy` | Answer addresses the question | >0.85 |
-| `context_precision` | Retrieved chunks are relevant | >0.75 |
-| `context_recall` | All needed info was retrieved | >0.80 |
+| `no_retrieval` | Greeting, chitchat, generic knowledge, math | LLM only |
+| `vector_only` | Conceptual / "what does our doc say about X" | Qdrant + reranker + LLM with `[n]` citations |
+| `sql_only` | Quantitative / "how many" / "top N" / aggregates | NL→SQL → execute → LLM with `[DB]` citation |
+| `hybrid` | Question needs both narrative AND a number | Vector AND SQL → blended answer |
+| `clarify` | Genuinely ambiguous | One focused follow-up question, no retrieval cost |
 
-### Custom router metric
+### How a decision is made
+
+A single LLM call with structured output. The classifier model is intentionally cheap (`gpt-4.1-nano` by default) — classification doesn't need frontier reasoning, and we want this on the hot path of every chat turn.
 
 ```python
-def routing_accuracy(predictions, golden):
-    correct = sum(p.strategy == g["expected_strategy"] for p, g in zip(predictions, golden))
-    return correct / len(golden)
+class RouterDecision(BaseModel):
+    strategy: Strategy                   # one of the five above
+    reasoning: str                        # one-sentence justification
+    vector_query: str | None              # optional rephrased search query
+    sql_intent: str | None                # NL description for the SQL tool
+    clarification_question: str | None    # only set when strategy == clarify
 ```
 
-Run on every PR. Fail CI if regression > 5%.
+The router prompt includes:
+1. Strategy descriptions + few-shot examples (anchors classification).
+2. The actual chat history (so follow-ups like "what about last quarter?" can resolve to a real referent instead of always falling to `clarify`).
+3. A one-line summary of available SQL tables — fetched via `inspect()` once at startup. ~80 tokens. Lets the router decide "this is a database question" vs "this is a docs question."
+
+If `SQL_DATABASE_URL` is unset, the prompt is told "no SQL backend" and a sanitizer downgrades any leaked `sql_only`/`hybrid` decision to `vector_only`. The router can never pick a strategy it can't fulfill.
+
+### Dispatch
+
+`AdaptiveDispatcher.answer(query, history)` is the single entry point the chat UI calls. It:
+
+1. Classifies the query.
+2. For `clarify` / `no_retrieval`: short-circuits without touching retrieval or SQL.
+3. For `vector_only` / `hybrid`: runs the retrieval pipeline.
+4. For `sql_only` / `hybrid`: runs the SQL tool. If the tool fails (DB down, query rejected), records a note and continues with whatever else it has.
+5. Calls the appropriate `GroundedAnswerer` method.
+6. Returns an `AdaptiveAnswer` with strategy, decision, citations, executed SQL, and per-stage timings.
+
+Backends are initialized lazily on first use so the app starts fast even when SQL or OpenAI aren't configured.
+
+---
+
+## 10. Tool Layer (Read-Only SQL)
+
+### Defense in depth
+
+The SQL tool is *not* an agent. It runs once per turn, with five layers of safety:
+
+1. **Dedicated read-only Postgres role.** `seed_demo_data.py` creates `adaptive_rag_ro` with `SELECT`-only grants. The app connects as that role.
+2. **Statement-level allowlist.** Only `SELECT` and `WITH` (CTE-resolved-to-SELECT) statements are accepted.
+3. **Forbidden-keyword regex.** Catches `INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|GRANT|REVOKE|COPY|VACUUM|...` even if the role grants would already block them.
+4. **Per-session statement timeout.** Default 5 seconds (`SQL_QUERY_TIMEOUT_SEC`); runaway plans die fast.
+5. **Implicit row cap.** A `LIMIT N` (default 200, `SQL_ROW_LIMIT`) is appended if the SQL doesn't already cap rows.
+
+Plus `SET TRANSACTION READ ONLY` on every connection — belt + suspenders + bungee.
+
+### NL → SQL
+
+A second LLM call (`gpt-4.1-mini` by default, `SQL_MODEL`) translates the router's `sql_intent` into a single `SELECT`. Schema is included in the prompt — generated once via SQLAlchemy `inspect()` at startup, formatted as DDL-style table descriptions with column types, primary keys, and foreign keys.
+
+Structured output forces a `_SqlOutput { sql: str }` schema, so the LLM can't dump prose around the query.
+
+### Demo dataset
+
+`scripts/seed_demo_data.py` builds a deterministic e-commerce schema:
+
+```
+customers   (100 rows)  — id, name, email, country, signup_date
+products    (50 rows)   — id, name, category, price, stock
+orders      (500 rows)  — id, customer_id, status, total, created_at
+order_items (~1300 rows) — id, order_id, product_id, quantity, unit_price
+refunds     (~35 rows)  — id, order_id, amount, reason, created_at
+```
+
+Idempotent (skips if already populated) with `--recreate` to wipe and reseed. The fixed RNG seed gives the same data every run, so demos and golden-set evals are reproducible.
+
+### Optional MCP surface (Phase 7)
+
+The same `SqlTool` and retrieval pipeline can be exposed as an MCP server so Cursor / Claude Desktop can use them without the Gradio UI. This is the *correct* use of MCP — making the same capabilities reusable across LLM clients — not as a microservice framework.
+
+---
+
+## 11. Synthesis & Citations
+
+`GroundedAnswerer` has three modes that the dispatcher selects:
+
+| Method | Used for | Context shape |
+|---|---|---|
+| `answer_direct` | `no_retrieval` | Just the user query + chat history |
+| `answer` | `vector_only` | Numbered passage block `[1]..[N]` |
+| `answer_with_sql` | `sql_only` / `hybrid` | Passages **plus** a "Database query results" section with the executed SQL and a markdown-rendered preview of rows |
+
+### Citation contract
+
+The system prompt requires inline brackets for every claim:
+
+- `[1]`, `[2, 3]` — refer to chunk numbers in the passage block.
+- `[DB]` — refers to the SQL results block (only valid when SQL data is present).
+
+The chat layer parses the LLM's output back into structured citations:
+
+```python
+@dataclass
+class Citation:
+    index: int            # 1-based chunk number
+    label: str            # "policy.pdf > Refunds"
+    snippet: str          # short preview
+    source: str | None
+    doc_id: str | None
+    rank: int
+    rerank_score: float | None
+    hybrid_score: float
+```
+
+Only chunks the LLM actually cited end up in the right-hand Sources panel — clean UI by default, with a debug mode that surfaces all retrieved chunks if the LLM cites none. The `cited_db` boolean flag drives a separate "SQL executed" block in the panel.
 
 ---
 
 ## 12. Caching & Cost Control
 
-Both Qwen3-VL and OpenAI embeddings cost real money. Without caching, dev iteration burns budget.
+Three caches on disk, all SHA256-keyed:
 
-### OCR cache
+| Cache | Key | Rationale |
+|---|---|---|
+| OCR | `sha256(image_bytes)` | Qwen3-VL is paid per-call. Re-ingest of the same image must never re-OCR. |
+| Dense embeddings | `sha256(model_name + text)` | OpenAI is paid per-token. Re-chunking with the same content must not re-embed. |
+| Reranker model | FlashRank's own | First-use download (~34 MB), reused thereafter. |
 
-```python
-# src/cache/ocr_cache.py
-import hashlib, json
-from pathlib import Path
+Default location is `./.cache/`, override with `CACHE_DIR`.
 
-class OCRCache:
-    def __init__(self, root: Path = Path(".cache/ocr")):
-        self.root = root
-        self.root.mkdir(parents=True, exist_ok=True)
-
-    def _key(self, image_bytes: bytes) -> str:
-        return hashlib.sha256(image_bytes).hexdigest()
-
-    def get(self, image_bytes: bytes) -> str | None:
-        p = self.root / f"{self._key(image_bytes)}.md"
-        return p.read_text(encoding="utf-8") if p.exists() else None
-
-    def put(self, image_bytes: bytes, markdown: str) -> None:
-        p = self.root / f"{self._key(image_bytes)}.md"
-        p.write_text(markdown, encoding="utf-8")
-```
-
-Same pattern for embeddings (key = `sha256(text + model_name)`).
-
-### Cost tracking
-
-```python
-# src/observability/cost_tracker.py
-PRICES = {  # $/1k tokens or $/call — keep updated
-    "gpt-4.1-nano": (0.10, 0.40),       # input, output per 1M
-    "text-embedding-3-small": (0.02, 0),
-    "qwen3-vl-plus": (0.0036, 0.012),   # per image, ~rough
-    "cohere-rerank-3": (2.0, 0),        # per 1k searches
-}
-```
-
-Log per-query cost to Langfuse. Surface daily/weekly totals in a Gradio admin tab.
+Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-4.1-mini`). Routing (`gpt-4.1-nano`) is roughly 1/10th the cost; SQL translation is one extra mini-call only when needed. A live cost tracker is Phase 6 work.
 
 ---
 
-## 13. Phased Implementation Plan
+## 13. Configuration
 
-Each phase ends with a working, demonstrable artifact and an eval run.
+Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclass loaded once from `.env` via `python-dotenv`. Some highlights:
 
-### Phase 1 — Document → Markdown ✅ (done)
-- `src/core/converter.py` (Docling) ✅
-- `src/core/file_detector.py` ✅
-- Gradio UI for upload + preview + download ✅
-
-### Phase 2 — Add Qwen3-VL fallback + caching (1-2 days)
-- `src/core/ocr_qwen.py`
-- `src/core/parser_router.py` with born-digital vs scanned heuristic
-- `src/cache/ocr_cache.py`
-- UI toggle: "Force high-quality OCR (Qwen)"
-
-### Phase 3 — Chunk + index (2-3 days)
-- `src/chunking/markdown_chunker.py` (header-aware)
-- `src/indexing/embeddings.py` (dense + sparse via FastEmbed)
-- `src/indexing/qdrant_store.py` (hybrid collection)
-- `src/cache/embedding_cache.py`
-- Docker compose with Qdrant
-- UI: ingest tab → upload → indexed confirmation
-
-### Phase 4 — Retrieval + reranker + simple chat (2-3 days) ✅
-- `src/config/settings.py` — single source of truth for all tunables
-- `src/retrieval/hybrid_search.py` — `HybridRetriever` + `RetrievalPipeline`
-- `src/retrieval/reranker.py` — FlashRank ONNX cross-encoder
-- `src/synthesis/response.py` — `GroundedAnswerer` (numbered context, inline `[n]` citations, refusal on out-of-context)
-- `src/ui/chat_ui.py` — Chat tab with sources panel + per-turn debug strip
-- _(deferred to Phase 6)_ Build initial golden set (~20 Q&A)
-- _(deferred to Phase 6)_ First Ragas baseline
-
-### Phase 5 — Adaptive router (3-4 days) ✅
-- `src/routing/strategies.py` — five-strategy `StrEnum` + capability sets
-- `src/routing/prompts.py` — router system prompt + few-shot examples + schema injection
-- `src/routing/adaptive_router.py` — `ChatOpenAI(...).with_structured_output(RouterDecision)` classifier (`gpt-4.1-nano` default), schema-aware, downgrades SQL strategies if backend missing
-- `src/routing/dispatcher.py` — `AdaptiveDispatcher` orchestrates the whole turn (router → retrieval → SQL → synthesis) with per-stage timings and lazy backend init
-- `src/tools/sql_tool.py` — schema introspection, NL→SQL with structured output, defense-in-depth safety (read-only role + statement allowlist + forbidden-keyword regex + `statement_timeout` + `LIMIT N` injection)
-- `src/synthesis/response.py` — extended `GroundedAnswerer` with `answer_direct` (no_retrieval) and `answer_with_sql` (sql_only / hybrid). Single citation model: `[1]..[N]` for chunks, `[DB]` for SQL.
-- `scripts/seed_demo_data.py` — deterministic e-commerce dataset (100 customers, 50 products, 500 orders, ~1300 line items, ~35 refunds) + dedicated `adaptive_rag_ro` Postgres role
-- Postgres added to `docker-compose.yml` (`postgres:17-alpine`, healthcheck, persistent volume), bound to host port `5433` to avoid colliding with host-installed Postgres
-- ~~`src/tools/registry.py`~~ — dropped on purpose. With explicit routing → dispatch we don't need a function-calling registry abstraction.
-- _(deferred to Phase 6)_ Expand golden set to 30-50 across all strategies + routing-accuracy metric
-
-### Phase 6 — Eval, tracing, polish (2 days)
-- `src/eval/ragas_runner.py` + HTML report
-- Langfuse integration
-- Cost tracker tab in UI
-- README rewrite with demo gif/screenshots
-- (Optional) MCP surface
-
-### Phase 7 — Stretch goals
-- C-RAG self-reflection loop
-- Multi-hop retrieval (when `clarify` strategy escalates)
-- Expose as MCP server for Cursor/Claude Desktop
-- Web search fallback when context insufficient
-
-**Total realistic timeline:** 2-3 weeks of focused evening/weekend work.
+| Setting | Default | What |
+|---|---|---|
+| `OPENAI_API_KEY` | (required) | Embeddings, router, SQL gen, synthesis |
+| `QWEN_API_KEY` | (required for OCR) | DashScope endpoint |
+| `QDRANT_URL` | `http://localhost:6333` (or unset → embedded mode) | Vector DB |
+| `QDRANT_COLLECTION` | `adaptive_rag` | Collection name |
+| `DENSE_MODEL` | `text-embedding-3-small` | Must match `DENSE_SIZE` |
+| `DENSE_SIZE` | `1536` | Vector dimensions |
+| `SPARSE_MODEL` | `Qdrant/bm25` | FastEmbed BM25 |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1500` / `200` | Recursive splitter |
+| `RETRIEVAL_PREFETCH_K` | `25` | Candidates fetched before rerank |
+| `RERANK_TOP_K` | `5` | Final chunks shown to the LLM |
+| `RERANKER_MODEL` | `ms-marco-MiniLM-L-12-v2` | FlashRank model |
+| `LLM_MODEL` | `gpt-4.1-mini` | Synthesis |
+| `LLM_TEMPERATURE` | `0.2` | |
+| `ROUTER_MODEL` | `gpt-4.1-nano` | Cheap classifier |
+| `SQL_MODEL` | `gpt-4.1-mini` | NL→SQL translator |
+| `SQL_DATABASE_URL` | (unset) | Leave unset to disable `sql_only` / `hybrid` strategies |
+| `SQL_QUERY_TIMEOUT_SEC` | `5` | Per-query Postgres timeout |
+| `SQL_ROW_LIMIT` | `200` | Implicit `LIMIT N` injection |
+| `CACHE_DIR` | `./.cache` | OCR + embedding caches |
 
 ---
 
-## 14. Decision Log
+## 14. Implementation Status
+
+| Phase | Status | Description |
+|---|---|---|
+| 0. Setup & infra | ✅ | Repo, deps, Docker compose, settings |
+| 1. Docling baseline | ✅ | Document → markdown for native formats |
+| 2. Parser router + Qwen | ✅ | Born-digital vs scanned heuristic, Qwen3-VL OCR with cache |
+| 3. Chunking + indexing | ✅ | Header-aware chunks, hybrid Qdrant collection, dedup |
+| 4. Retrieval + chat | ✅ | Hybrid search + RRF + FlashRank + grounded answers with `[n]` citations |
+| 5. Adaptive router + SQL | ✅ | Five-strategy router, read-only SQL tool, `[DB]` citations |
+| 6. Eval + tracing + polish | ⬜ | Ragas golden set, Langfuse, cost tracker, docs |
+| 7. Stretch | ⏸️ | C-RAG self-reflection, multi-hop, MCP server, web fallback |
+
+See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance criteria.
+
+---
+
+## 15. Decision Log
 
 | Decision | Chosen | Rejected | Reason |
 |---|---|---|---|
 | Routing layer | Query-time LLM classifier | Ingest-time extension matching | A PDF can have prose AND tables; routing must see the question |
-| Doc parser | Docling | LangChain native loaders, LlamaParse, Marker | Free, local, table-aware, multi-format, already in deps |
-| OCR | Qwen3-VL-Plus (API) | GLM-OCR (self-hosted), EasyOCR | No GPU needed, better quality on complex layouts, cheap per-image |
-| Vector DB | Qdrant | pgvector, Weaviate, Chroma | Best hybrid (dense + sparse) support, already pinned |
-| Sparse | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
-| Reranker | FlashRank `ms-marco-MiniLM-L-12-v2` (local ONNX) | BGE-reranker-v2-m3 (heavy, needs Torch), Cohere Rerank (paid), ColBERT (no off-the-shelf cross-encoder) | Pure-ONNX runtime via `onnxruntime` (already pulled in by `fastembed`), ~34 MB model, no Torch / Transformers — avoids the Python-3.14 native-dep instability we already hit with `py-rust-stemmers` |
-| LLM router | gpt-4.1-nano OR qwen-turbo | gpt-4.1, claude | Cheap, fast, classification doesn't need frontier |
-| Tool protocol | Native function calling | MCP for everything | MCP only when external clients consume; one-agent app doesn't need it |
-| Task queue | `BackgroundTasks` | Celery + Redis | YAGNI — add when measured queue depth justifies |
+| Document parser | Docling | LangChain native loaders, LlamaParse, Marker | Free, local, table-aware, multi-format |
+| OCR | Qwen3-VL-Plus (API) | GLM-OCR (self-hosted), EasyOCR, Tesseract | No GPU, better quality on complex layouts, cheap per-image |
+| Vector DB | Qdrant | pgvector, Weaviate, Chroma | Best hybrid (dense + sparse) support, server-side RRF |
+| Sparse encoder | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
+| Reranker | FlashRank `ms-marco-MiniLM-L-12-v2` | BGE-reranker-v2-m3 (Torch), Cohere Rerank (paid), ColBERT | Pure ONNX via `onnxruntime` (already pulled by `fastembed`); no Torch / Transformers; sidesteps Python-3.14 native-extension instability we hit with `py-rust-stemmers` |
+| Router LLM | `gpt-4.1-nano` | `gpt-4.1-mini`, `claude-haiku` | Cheapest model that classifies reliably; classification doesn't need frontier reasoning |
+| Synthesis LLM | `gpt-4.1-mini` | `gpt-4.1`, `gpt-4o-mini` | Strong enough to follow citation rules, cheap enough for hot path |
+| Tool protocol | Native Python class with explicit dispatch | OpenAI function calling registry, MCP for everything | We're not an agent loop — the router *picks* a strategy, then we run it. Registry abstraction is dead weight. MCP only when external clients consume. |
+| SQL backend | Postgres in Docker bound to host port 5433 | Default 5432, SQLite, Neon | 5433 sidesteps collisions with host-installed Postgres on 5432; users can swap to Neon by changing `SQL_DATABASE_URL` |
+| Read-only enforcement | Dedicated DB role + statement allowlist + keyword regex + statement_timeout + LIMIT injection + READ ONLY transaction | Just one of those | Defense in depth — any one layer might be misconfigured |
+| Task queue | `BackgroundTasks` | Celery + Redis | YAGNI; add when measured queue depth justifies it |
 | File watching | Manual upload | watchdog filesystem watcher | UI-driven flow is enough; watcher is feature creep |
-| DB sync | Live SQL tool | CDC (Debezium) | Core principle: never embed structured data |
-| Eval | Ragas + custom router metric | None / vibes-based | Portfolio projects without metrics look unfinished |
+| DB sync to vectors | Live SQL tool, query at runtime | CDC (Debezium et al.) | Core principle: never embed structured data |
+| Eval | Ragas + custom routing-accuracy metric | None / vibes-based | Portfolio projects without metrics look unfinished |
 | Tracing | Langfuse | Prometheus + Grafana + Jaeger | LLM-native, single signup, free tier |
 
 ---
 
-## 15. Open Questions
+## 16. Future Work
 
-1. **Embedding model** — start with `text-embedding-3-small` for cost, or jump to `BAAI/bge-m3` (free, multilingual, includes sparse natively, would let us drop FastEmbed)?
-2. **Reranker model** — local BGE (free, +CPU) or Cohere (paid, faster, slightly better)?
-3. **SQL demo source** — synthetic e-commerce dataset, or hook up to Neon (already in MCP list) for a real Postgres? Neon makes the demo more impressive.
-4. **Multi-collection** — single `adaptive_rag` collection with metadata filters, or split per-domain (`policies`, `finance_reports`, etc.)? Metadata is simpler; per-domain enables faster filters at scale.
-5. **Image-in-markdown** — Docling can extract images and embed as `![alt](path)`. Should we OCR those embedded images with Qwen and inline the text, or leave as references? Affects retrieval recall on visual content.
-6. **Streaming** — Gradio supports streaming; worth wiring through synthesis layer for better UX.
+### Phase 6 — Eval, tracing, polish
 
-Decisions on these can wait until Phase 4-5 measurement.
+- `src/eval/golden.jsonl` — 30–50 Q&A pairs across all five strategies, including adversarial / edge cases.
+- `src/eval/ragas_runner.py` — faithfulness, answer relevancy, context precision, context recall + an HTML report.
+- Routing-accuracy metric on the golden set, gated in CI (fail on >5% regression).
+- Langfuse spans on every dispatcher stage (router → retrieval → SQL → synthesis), including token counts and per-call cost.
+- `src/observability/cost_tracker.py` + a Gradio admin tab showing daily / weekly cost breakdown.
+- README polish — demo gif, screenshots, eval scores baked in.
+
+### Phase 7 — Stretch
+
+- **C-RAG self-reflection.** Grade retrieved context for relevance; on low scores, re-route or fall back to web search.
+- **Multi-hop retrieval.** When `clarify` would have been picked, escalate to step-by-step iterative search instead of asking the user.
+- **MCP server.** Expose `search_docs` and `query_sql` so Cursor / Claude Desktop can use the same tools.
+- **Web search fallback.** Tavily / Exa when local context is insufficient.
+- **Streaming responses.** Wire LLM streaming through Gradio for snappier UX.
+- **Multi-collection Qdrant.** Split per-domain (`policies`, `finance`, `technical`) once ingest volume justifies the operational cost.
+- **Image-in-markdown OCR.** Extract images from Docling output, OCR them with Qwen, inline the text into the parent markdown.
 
 ---
 
