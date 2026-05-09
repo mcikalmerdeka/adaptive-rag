@@ -80,6 +80,16 @@ class Settings:
     LLM_TEMPERATURE: float
     LLM_MAX_TOKENS: int
 
+    # ---- Adaptive router (Phase 5) ----
+    ROUTER_MODEL: str
+    ROUTER_TEMPERATURE: float
+    SQL_MODEL: str
+
+    # ---- SQL tool (Phase 5) ----
+    SQL_DATABASE_URL: str | None
+    SQL_QUERY_TIMEOUT_SEC: int
+    SQL_ROW_LIMIT: int
+
     # ---- Cache directories ----
     CACHE_DIR: Path
 
@@ -103,6 +113,12 @@ def _load() -> Settings:
         LLM_MODEL=_env_str("LLM_MODEL", "gpt-4.1-mini"),
         LLM_TEMPERATURE=_env_float("LLM_TEMPERATURE", 0.2),
         LLM_MAX_TOKENS=_env_int("LLM_MAX_TOKENS", 1024),
+        ROUTER_MODEL=_env_str("ROUTER_MODEL", "gpt-4.1-nano"),
+        ROUTER_TEMPERATURE=_env_float("ROUTER_TEMPERATURE", 0.0),
+        SQL_MODEL=_env_str("SQL_MODEL", "gpt-4.1-mini"),
+        SQL_DATABASE_URL=_env_optional("SQL_DATABASE_URL"),
+        SQL_QUERY_TIMEOUT_SEC=_env_int("SQL_QUERY_TIMEOUT_SEC", 5),
+        SQL_ROW_LIMIT=_env_int("SQL_ROW_LIMIT", 200),
         CACHE_DIR=Path(_env_str("CACHE_DIR", "./.cache")),
     )
 

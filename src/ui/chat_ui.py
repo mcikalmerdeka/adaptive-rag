@@ -1,67 +1,161 @@
-"""Chat tab: ask questions, get grounded answers with citations.
+"""Chat tab: adaptive routing + grounded answers with citations.
 
 Pipeline per turn:
-    user msg → HybridRetriever → Reranker → top-K chunks → ChatOpenAI →
-    answer + numbered citations.
+    user msg
+       \u2192 AdaptiveRouter (classify)
+       \u2192 dispatch one of [no_retrieval | vector_only | sql_only | hybrid | clarify]
+       \u2192 (vector path)  HybridRetriever \u2192 Reranker \u2192 top-K chunks
+       \u2192 (sql path)     NL\u2192SQL \u2192 read-only execute \u2192 rows
+       \u2192 GroundedAnswerer (chunks + SQL + history) \u2192 answer + citations
 
-The Qdrant store, reranker and LLM are all built lazily on first use so
-the UI starts fast even before any of those are configured.
+The dispatcher is built lazily so the UI starts fast even when SQL or
+OpenAI aren't configured.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import gradio as gr
 
 from src.config import settings
-from src.retrieval import RetrievalPipeline
-from src.synthesis import AnswerResponse, GroundedAnswerer, SynthesisError
+from src.routing import AdaptiveAnswer, AdaptiveDispatcher, Strategy
+from src.routing.dispatcher import DispatchError
 
 logger = logging.getLogger(__name__)
 
 
-_pipeline: RetrievalPipeline | None = None
-_answerer: GroundedAnswerer | None = None
+_dispatcher: AdaptiveDispatcher | None = None
 
 
-def _get_pipeline() -> RetrievalPipeline:
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = RetrievalPipeline()
-    return _pipeline
+def _get_dispatcher() -> AdaptiveDispatcher:
+    global _dispatcher
+    if _dispatcher is None:
+        _dispatcher = AdaptiveDispatcher()
+    return _dispatcher
 
 
-def _get_answerer() -> GroundedAnswerer:
-    global _answerer
-    if _answerer is None:
-        _answerer = GroundedAnswerer()
-    return _answerer
+# ---- formatting helpers ---------------------------------------------------
 
 
-def _format_sources_md(response: AnswerResponse) -> str:
-    if not response.used_chunks:
-        return "_No chunks were retrieved for this turn._"
+def _strategy_badge(answer: AdaptiveAnswer) -> str:
+    icon = {
+        Strategy.NO_RETRIEVAL: "\U0001F4AC",  # speech balloon
+        Strategy.VECTOR_ONLY: "\U0001F4DA",   # books
+        Strategy.SQL_ONLY: "\U0001F4CA",      # bar chart
+        Strategy.HYBRID: "\U0001F517",        # link
+        Strategy.CLARIFY: "\u2753",           # question mark
+    }.get(answer.strategy, "\u2022")
+    return f"{icon} **{answer.strategy_label}**"
 
-    citations = response.citations
-    if not citations:
-        return "_LLM did not cite any chunks. All retrieved chunks shown below._"
 
-    lines: list[str] = [
-        f"**{len(citations)} source(s) cited** "
-        f"(from top {len(response.used_chunks)} retrieved):"
+def _format_sources_md(answer: AdaptiveAnswer) -> str:
+    """Right-pane content: router decision \u2192 SQL block \u2192 chunk citations."""
+    blocks: list[str] = []
+
+    # 1. Router decision summary.
+    blocks.append(
+        f"### {_strategy_badge(answer)}\n"
+        f"<sub>{_escape(answer.decision.reasoning)}</sub>"
+    )
+
+    # 2. Notes (e.g. SQL fallback messages).
+    for note in answer.notes:
+        blocks.append(f"> \u26a0 {_escape(note)}")
+
+    # 3. SQL block (if any).
+    if answer.sql_result is not None:
+        sql = answer.sql_result
+        rows_preview = ""
+        if sql.rows:
+            preview = sql.rows[:5]
+            cols = sql.columns
+            header = "| " + " | ".join(cols) + " |"
+            sep = "| " + " | ".join("---" for _ in cols) + " |"
+            body_lines = [
+                "| " + " | ".join(_render_cell(r.get(c)) for c in cols) + " |"
+                for r in preview
+            ]
+            extra = (
+                f"\n_Showing first {len(preview)} of {sql.row_count} rows"
+                + (" (truncated)" if sql.truncated else "")
+                + "._"
+            )
+            rows_preview = "\n".join([header, sep, *body_lines]) + extra
+        else:
+            rows_preview = "_(no rows returned)_"
+
+        blocks.append(
+            "**SQL executed**\n\n"
+            f"```sql\n{sql.sql}\n```\n\n"
+            f"**Results** ({sql.elapsed_ms:.0f}ms)\n\n{rows_preview}"
+        )
+
+    # 4. Chunk citations.
+    response = answer.response
+    if response is not None and response.used_chunks:
+        if response.citations:
+            blocks.append(
+                f"**{len(response.citations)} chunk citation(s)** "
+                f"(from top {len(response.used_chunks)} retrieved):"
+            )
+            for c in response.citations:
+                score_bits: list[str] = []
+                if c.rerank_score is not None:
+                    score_bits.append(f"rerank `{c.rerank_score:.3f}`")
+                score_bits.append(f"hybrid `{c.hybrid_score:.3f}`")
+                blocks.append(
+                    f"\n**[{c.index}] {_escape(c.label)}**\n"
+                    f"<sub>{' \u00b7 '.join(score_bits)} \u00b7 doc_id `{c.doc_id or '?'}`</sub>\n"
+                    f"\n> {_escape(c.snippet)}\n"
+                )
+        else:
+            blocks.append(
+                f"_LLM did not cite any chunks. {len(response.used_chunks)} were retrieved._"
+            )
+
+    if response is None and answer.sql_result is None and answer.strategy not in (
+        Strategy.NO_RETRIEVAL,
+        Strategy.CLARIFY,
+    ):
+        blocks.append("_No sources retrieved this turn._")
+
+    return "\n\n".join(blocks)
+
+
+def _format_debug_md(answer: AdaptiveAnswer) -> str:
+    t = answer.timings
+    parts = [
+        f"<sub>Strategy `{answer.strategy.value}` "
+        f"\u00b7 routing {t.routing_ms:.0f}ms"
     ]
-    for c in citations:
-        score_bits = []
-        if c.rerank_score is not None:
-            score_bits.append(f"rerank `{c.rerank_score:.3f}`")
-        score_bits.append(f"hybrid `{c.hybrid_score:.3f}`")
-        score_str = " · ".join(score_bits)
+    if t.retrieval_ms:
+        parts.append(f"retrieval {t.retrieval_ms:.0f}ms")
+    if t.sql_ms:
+        parts.append(f"sql {t.sql_ms:.0f}ms")
+    if t.synthesis_ms:
+        parts.append(f"synthesis {t.synthesis_ms:.0f}ms")
+    parts.append(f"total {t.total_ms:.0f}ms</sub>")
+    return " \u00b7 ".join(parts)
 
-        lines.append(f"\n**[{c.index}] {c.label}**")
-        lines.append(f"<sub>{score_str} · doc_id `{c.doc_id or '?'}`</sub>")
-        lines.append(f"\n> {c.snippet}\n")
-    return "\n".join(lines)
+
+def _format_idle_sources() -> str:
+    return "_Sources for the most recent answer will appear here._"
+
+
+def _format_idle_debug() -> str:
+    return (
+        f"<sub>Router `{settings.ROUTER_MODEL}` "
+        f"\u00b7 LLM `{settings.LLM_MODEL}` "
+        f"\u00b7 SQL `{settings.SQL_MODEL}` "
+        f"\u00b7 reranker `{settings.RERANKER_MODEL}` "
+        f"\u00b7 prefetch `{settings.RETRIEVAL_PREFETCH_K}` "
+        f"\u00b7 top-K `{settings.RERANK_TOP_K}`</sub>"
+    )
+
+
+# ---- gradio callbacks -----------------------------------------------------
 
 
 def _chat_step(
@@ -75,97 +169,67 @@ def _chat_step(
     history = list(history) + [{"role": "user", "content": user_msg}]
 
     try:
-        report = _get_pipeline().retrieve(user_msg)
-    except Exception as exc:
-        logger.exception("Retrieval failed")
+        answer = _get_dispatcher().answer(user_msg, history=history[:-1])
+    except DispatchError as exc:
+        logger.exception("Dispatch failed")
         history.append(
             {
                 "role": "assistant",
                 "content": (
-                    f"**Retrieval error.** I couldn't reach the vector index.\n\n"
+                    "**Adaptive dispatch error.**\n\n"
                     f"`{exc}`\n\n"
-                    "If you're using Docker Qdrant, make sure the container is "
-                    "running (`docker compose up -d qdrant`). If you're using "
-                    "embedded mode, comment out `QDRANT_URL` in `.env`."
+                    "Common causes: Qdrant container not running, missing "
+                    "OpenAI key, or the SQL backend rejecting the query. "
+                    "Check the Postgres + Qdrant containers with "
+                    "`docker compose ps`."
                 ),
             }
         )
         return history, "", _format_idle_sources(), _format_idle_debug()
-
-    if report.final_count == 0:
+    except Exception as exc:
+        logger.exception("Unexpected chat failure")
         history.append(
             {
                 "role": "assistant",
-                "content": (
-                    "I couldn't find anything in the index for that. "
-                    "Have you ingested any documents in the **Ingest** tab yet?"
-                ),
+                "content": f"**Unexpected error.**\n\n`{exc}`",
             }
         )
         return history, "", _format_idle_sources(), _format_idle_debug()
 
-    try:
-        response = _get_answerer().answer(
-            user_msg,
-            report.chunks,
-            history=history[:-1],  # everything except the just-appended user turn
-        )
-    except SynthesisError as exc:
-        logger.exception("Synthesis failed")
-        history.append(
-            {
-                "role": "assistant",
-                "content": (
-                    f"**LLM error.** Retrieval succeeded "
-                    f"({report.final_count} chunks) but synthesis failed.\n\n"
-                    f"`{exc}`"
-                ),
-            }
-        )
-        return history, "", _format_idle_sources(), _format_idle_debug()
+    history.append({"role": "assistant", "content": answer.answer})
 
-    history.append({"role": "assistant", "content": response.answer})
-
-    sources_md = _format_sources_md(response)
-    debug_md = (
-        f"<sub>Model: `{response.model}` · "
-        f"Reranker `{settings.RERANKER_MODEL}` "
-        f"({'used' if report.reranker_used else 'skipped'}) · "
-        f"prefetch={report.fused_count} ({report.fused_ms:.0f}ms) → "
-        f"top {report.final_count} (rerank {report.rerank_ms:.0f}ms)</sub>"
-    )
-
+    sources_md = _format_sources_md(answer)
+    debug_md = _format_debug_md(answer)
     return history, "", sources_md, debug_md
-
-
-def _format_idle_sources() -> str:
-    return "_Sources for the most recent answer will appear here._"
-
-
-def _format_idle_debug() -> str:
-    return (
-        f"<sub>Reranker `{settings.RERANKER_MODEL}` · "
-        f"Prefetch K `{settings.RETRIEVAL_PREFETCH_K}` · "
-        f"Top K `{settings.RERANK_TOP_K}` · "
-        f"LLM `{settings.LLM_MODEL}`</sub>"
-    )
 
 
 def _clear_chat() -> tuple[list[dict], str, str, str]:
     return [], "", _format_idle_sources(), _format_idle_debug()
 
 
+def _backend_status() -> str:
+    sql_state = (
+        "connected" if _get_dispatcher().sql_available else "_disabled (no `SQL_DATABASE_URL`)_"
+    )
+    return f"<sub>SQL backend: {sql_state}</sub>"
+
+
+# ---- tab renderer ---------------------------------------------------------
+
+
 def render_chat_tab() -> None:
     """Build the Chat tab."""
     gr.Markdown(
         """
-        ### Ask your indexed documents
+        ### Ask AdaptiveRAG
 
-        Each question runs **hybrid search** (dense + BM25) over the Qdrant
-        collection, the top candidates are **reranked** with a cross-encoder,
-        and a grounded answer is synthesized from the top
-        **`RERANK_TOP_K`** chunks. Citations are inline (e.g. `[2]`) and the
-        sources panel below shows what the LLM actually used.
+        Each question is **routed at query time** to one of five strategies:
+        `no_retrieval`, `vector_only`, `sql_only`, `hybrid`, or `clarify`.
+        Vector queries hit the Qdrant index (hybrid dense + BM25 + reranker)
+        and produce inline `[n]` citations. SQL queries hit the Postgres
+        warehouse (read-only, with safety guards) and the LLM cites them
+        as `[DB]`. The router's decision and the executed SQL are visible
+        in the **Sources** panel on the right.
         """
     )
 
@@ -179,7 +243,10 @@ def render_chat_tab() -> None:
 
             with gr.Row():
                 user_input = gr.Textbox(
-                    placeholder="Ask anything about your indexed documents…",
+                    placeholder=(
+                        "Try: \"What does our refund policy cover?\" or "
+                        "\"How many refunds last month?\""
+                    ),
                     show_label=False,
                     scale=8,
                     autofocus=True,
@@ -190,7 +257,7 @@ def render_chat_tab() -> None:
             debug_display = gr.Markdown(value=_format_idle_debug())
 
         with gr.Column(scale=1):
-            gr.Markdown("#### Sources")
+            gr.Markdown("#### Sources & routing")
             sources_display = gr.Markdown(value=_format_idle_sources())
 
     user_input.submit(
@@ -204,3 +271,16 @@ def render_chat_tab() -> None:
         inputs=[],
         outputs=[chatbot, user_input, sources_display, debug_display],
     )
+
+
+# ---- tiny helpers ---------------------------------------------------------
+
+
+def _escape(s: str) -> str:
+    return (s or "").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _render_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("|", "\\|").replace("\n", " ")

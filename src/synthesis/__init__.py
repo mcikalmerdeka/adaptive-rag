@@ -1,6 +1,7 @@
 """LLM synthesis layer.
 
-Turns a query + ranked retrieval into a grounded answer with citations.
+Turns a query + ranked retrieval (and optionally SQL data) into a grounded
+answer with inline citations.
 """
 
 from .response import (

@@ -129,7 +129,7 @@
 | Eval | `ragas>=0.2`, `datasets` | Faithfulness, context precision/recall |
 | Tracing | `langfuse>=2.x` | LLM call traces, replaces ad-hoc logging |
 | HTTP retry | `tenacity>=9.x` ✅ | For Qwen API resilience |
-| SQL tool | `sqlalchemy>=2.x` | If/when SQL data source added |
+| SQL tool | `sqlalchemy>=2.0.36` + `psycopg[binary]>=3.2.3` ✅ | Read-only NL→SQL over Postgres with safety guards |
 | (Optional) MCP | `mcp>=1.x` | Only if exposing tools to external clients |
 
 ### To explicitly *not* add
@@ -632,12 +632,17 @@ Each phase ends with a working, demonstrable artifact and an eval run.
 - _(deferred to Phase 6)_ Build initial golden set (~20 Q&A)
 - _(deferred to Phase 6)_ First Ragas baseline
 
-### Phase 5 — Adaptive router (3-4 days)
-- `src/routing/adaptive_router.py`
-- `src/routing/strategies.py`
-- `src/tools/sql_tool.py` + sample postgres schema
-- Demo dataset (e.g. seeded e-commerce SQL + policy PDFs)
-- Expand golden set to 30-50 across all strategies
+### Phase 5 — Adaptive router (3-4 days) ✅
+- `src/routing/strategies.py` — five-strategy `StrEnum` + capability sets
+- `src/routing/prompts.py` — router system prompt + few-shot examples + schema injection
+- `src/routing/adaptive_router.py` — `ChatOpenAI(...).with_structured_output(RouterDecision)` classifier (`gpt-4.1-nano` default), schema-aware, downgrades SQL strategies if backend missing
+- `src/routing/dispatcher.py` — `AdaptiveDispatcher` orchestrates the whole turn (router → retrieval → SQL → synthesis) with per-stage timings and lazy backend init
+- `src/tools/sql_tool.py` — schema introspection, NL→SQL with structured output, defense-in-depth safety (read-only role + statement allowlist + forbidden-keyword regex + `statement_timeout` + `LIMIT N` injection)
+- `src/synthesis/response.py` — extended `GroundedAnswerer` with `answer_direct` (no_retrieval) and `answer_with_sql` (sql_only / hybrid). Single citation model: `[1]..[N]` for chunks, `[DB]` for SQL.
+- `scripts/seed_demo_data.py` — deterministic e-commerce dataset (100 customers, 50 products, 500 orders, ~1300 line items, ~35 refunds) + dedicated `adaptive_rag_ro` Postgres role
+- Postgres added to `docker-compose.yml` (`postgres:17-alpine`, healthcheck, persistent volume), bound to host port `5433` to avoid colliding with host-installed Postgres
+- ~~`src/tools/registry.py`~~ — dropped on purpose. With explicit routing → dispatch we don't need a function-calling registry abstraction.
+- _(deferred to Phase 6)_ Expand golden set to 30-50 across all strategies + routing-accuracy metric
 
 ### Phase 6 — Eval, tracing, polish (2 days)
 - `src/eval/ragas_runner.py` + HTML report

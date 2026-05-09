@@ -11,5 +11,30 @@ services:
       - QDRANT__LOG_LEVEL=INFO
     restart: unless-stopped
 
+  postgres:
+    image: postgres:17-alpine
+    container_name: adaptive_rag_postgres
+    # Bound to host port 5433 (not 5432) so it never collides with a
+    # host-installed Postgres. Inside the container it still listens on 5432.
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: adaptive_rag
+      POSTGRES_USER: adaptive_rag
+      POSTGRES_PASSWORD: adaptive_rag
+      # Force every new session into read-only mode by default. The seed
+      # script flips this for its own session via `SET SESSION CHARACTERISTICS`.
+      # The app uses a dedicated read-only role created in the seed script,
+      # so even if this default were missed the runtime user can't write.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adaptive_rag -d adaptive_rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   qdrant_storage:
+  postgres_data:
