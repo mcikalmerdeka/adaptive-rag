@@ -1,5 +1,14 @@
-{"id": "vec-01", "query": "What does the story say about aliens arriving in Jakarta?", "expected_strategy": "vector_only", "answer_must_contain": ["alien", "Jakarta"], "notes": "Narrative from indexed corpus."}
-{"id": "sql-01", "query": "How many refunds were issued in the last 30 days?", "expected_strategy": "sql_only", "expected_sql_keywords": ["count", "refunds"], "notes": "DB aggregate."}
-{"id": "hyb-01", "query": "Summarize the indexed story about Jakarta and tell me the total number of refunds we've processed", "expected_strategy": "hybrid", "answer_must_contain": ["Jakarta"], "expected_sql_keywords": ["count", "refunds"], "notes": "Docs + SQL."}
-{"id": "non-01", "query": "Hi there!", "expected_strategy": "no_retrieval", "notes": "Greeting."}
-{"id": "clr-01", "query": "What about last quarter?", "expected_strategy": "clarify", "notes": "Ambiguous follow-up."}
+{"id": "vec-01", "query": "What does the story say about aliens arriving in Jakarta?", "expected_strategy": "vector_only", "answer_must_contain": ["alien", "Jakarta"], "notes": "Direct narrative lookup over indexed story."}
+{"id": "vec-02", "query": "Where in Jakarta did the aliens first appear according to the indexed story?", "expected_strategy": "vector_only", "answer_must_contain": ["Bundaran HI"], "notes": "Specific landmark lookup."}
+
+{"id": "sql-01", "query": "How many refunds were issued in the last 30 days?", "expected_strategy": "sql_only", "expected_sql_keywords": ["count", "refunds", "interval"], "notes": "Time-windowed aggregate over refunds."}
+{"id": "sql-02", "query": "Top 5 customers by total spend", "expected_strategy": "sql_only", "expected_sql_keywords": ["sum", "customers", "order by", "limit 5"], "notes": "Ranking query with join."}
+
+{"id": "hyb-01", "query": "Summarize the indexed story about Jakarta and tell me the total number of refunds we've processed", "expected_strategy": "hybrid", "answer_must_contain": ["Jakarta"], "expected_sql_keywords": ["count", "refunds"], "notes": "Narrative summary + DB count."}
+{"id": "hyb-02", "query": "What does the story say about aliens, and how many orders have been refunded?", "expected_strategy": "hybrid", "answer_must_contain": ["alien"], "expected_sql_keywords": ["refunded"], "notes": "Narrative + DB count."}
+
+{"id": "non-01", "query": "Hi there!", "expected_strategy": "no_retrieval", "notes": "Pure greeting."}
+{"id": "non-02", "query": "What is RAG?", "expected_strategy": "no_retrieval", "notes": "Generic technical knowledge."}
+
+{"id": "clr-01", "query": "What about last quarter?", "expected_strategy": "clarify", "notes": "Ambiguous follow-up with no referent."}
+{"id": "clr-02", "query": "Tell me more", "expected_strategy": "clarify", "notes": "Pure follow-up, nothing to expand."}
