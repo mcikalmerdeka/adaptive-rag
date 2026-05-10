@@ -37,3 +37,4 @@ I write code that survives contact with reality.
 - NEVER add dependencies without checking if built-ins suffice
 - NEVER over-engineer for a scale that doesn't exist yet
 - ALWAYS ask: "Does this solve the actual problem?"
+- **ALWAYS reference the current date/time**: Today is {Month} {Year}. You search the current date in your operations and always remember that. When performing web searches or any time-sensitive queries, explicitly use the current year to avoid retrieving outdated results from previous years like 2024 or 2025.

@@ -32,11 +32,14 @@
       "enabled": true,
       "headers": {}
     },
-    "n8n-docs": {
+    "n8n-mcp": {
       "type": "remote",
-      "url": "https://n8n.mcp.kapa.ai/",
+      "url": "http://localhost:5678/mcp-server/http",
       "enabled": true,
-      "headers": {}
+      "headers": {
+        "Authorization": "Bearer {env:N8N_MCP_TOKEN}"
+      },
+      "oauth": false
     },
     "exa": {
       "type": "remote",
@@ -49,8 +52,13 @@
       "url": "https://mcp.neon.tech/mcp",
       "enabled": true,
       "headers": {
-        "Authorization": "Bearer napi_8jp6kt4ci2ob5lz0jzgv5wivdov439h72if6hg4zqyy2w1krw8f0thwmzl0e5dpz"
+        "Authorization": "Bearer {env:NEON_API_KEY}"
       }
+    },
+    "eraser": {
+      "type": "remote",
+      "url": "https://app.eraser.io/api/mcp",
+      "enabled": true
     }
   }
 }
