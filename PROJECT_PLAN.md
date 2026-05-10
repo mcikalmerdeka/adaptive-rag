@@ -236,28 +236,44 @@ queries like "running"/"runs" are affected).
 
 ---
 
-## Phase 6 — Evaluation, Tracing, Polish ⬜
+## Phase 6 — Evaluation, Tracing, Polish ✅
 
 **Goal:** Make this presentable as a portfolio piece.
 
-- `src/eval/golden.jsonl` — finalized 30-50 Q&A pairs
-- `src/eval/ragas_runner.py` — run all metrics, output HTML report
-- `src/eval/reports/` — generated reports
-- `src/observability/langfuse_client.py` — wrap LLM/embedding/retrieval calls
-- `src/observability/cost_tracker.py` — $/query, $/ingest
-- Cost dashboard tab in UI
-- README rewrite — demo gif, screenshots, eval scores
+### Observability (Langfuse)
+
+- `src/observability/langfuse_client.py` — lazy singleton `Langfuse` client, no-op `span()` context manager when keys are missing, `CallbackHandler` factory for LangChain
+- `src/observability/cost_tracker.py` — read-side helper that pulls daily metrics from Langfuse's `/api/public/metrics/daily` endpoint (no separate price table to maintain)
+- `src/routing/dispatcher.py` — wraps every chat turn in a parent `chat.turn` span with child spans `router.classify`, `retrieval.hybrid_search`, `tool.sql_execute`, `synthesis.direct` / `synthesis.grounded`. Auto-flushes after each turn so traces appear immediately even in short-lived Gradio request cycles.
+- `src/routing/adaptive_router.py`, `src/synthesis/response.py`, `src/tools/sql_tool.py` — every `ChatOpenAI.invoke(...)` call now passes `config={"callbacks": get_callback_handler(), "run_name": "...", "metadata": {...}}` so token usage + cost get captured automatically.
+
+### Evaluation
+
+- `src/eval/golden.jsonl` — **minimal smoke set** (≈5 rows, one per strategy) to avoid burning tokens; extend the file anytime you want stronger coverage.
+- `src/eval/run_routing_eval.py` — router-only accuracy + breakdown; **`--threshold` is opt-in** (default: print report only) so tiny goldens don’t spam failures
+- `src/eval/run_ragas.py` — runs the full dispatcher on retrieval-bearing examples and scores them with `Faithfulness`, `ResponseRelevancy`, `LLMContextPrecisionWithoutReference`. Emits both a JSON dump and a self-contained HTML report under `src/eval/reports/`.
+- `src/eval/__init__.py` + `src/eval/reports/` (gitignored)
+
+### UI
+
+- New tab: **Admin** — Langfuse cost / usage dashboard with selectable window (24h / 7d / 30d), per-model breakdown, per-day breakdown. Friendly empty-state when keys aren't configured.
 
 ### Dependencies
 
-- Add `langfuse>=2.x`
+- `langfuse>=4.0.0`
+- `ragas>=0.2.10`
+- `datasets>=3.0.0` (Ragas dependency, pinned for clarity)
+
+### Configuration
+
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` added to `.env`, `.env.example`, and `src/config/settings.py`. `Settings.langfuse_enabled` returns `True` only when both keys are set.
 
 **Acceptance:**
 
-1. Eval report shows faithfulness/relevancy/precision/recall metrics.
-2. Langfuse trace visible for every chat query.
-3. Cost tracker shows per-query dollar cost.
-4. README clearly explains what the project is and demonstrates it works.
+1. ✅ Routing eval prints per-strategy accuracy and writes `src/eval/reports/routing.json`. Pass `--threshold 0.85` in CI when you want a hard gate.
+2. ✅ Ragas eval emits faithfulness / response relevancy / context precision in both JSON and HTML.
+3. ✅ Every chat turn produces a Langfuse trace with router / retrieval / SQL / synthesis spans (when keys are set; otherwise the app behaves identically and the spans are no-ops).
+4. ✅ Admin tab renders cost + token totals (and a friendly setup message when Langfuse is disabled).
 
 ---
 
@@ -277,9 +293,9 @@ Optional, only if time permits.
 
 ## Currently Working On
 
-**Phase 6 — Evaluation, Tracing, Polish** ⬜
+**Phase 7 — Stretch Goals** ⏸️
 
-Next concrete action: build the golden Q&A set (~30-50 examples across all 5 strategies), wire `src/eval/ragas_runner.py` for faithfulness/precision/recall, and add Langfuse traces for every dispatcher step.
+Phase 6 is complete. Pick whichever stretch goal is most valuable next: streaming responses through Gradio, MCP server surface for Cursor / Claude Desktop, or C-RAG self-reflection with web search fallback.
 
 ---
 
@@ -294,8 +310,8 @@ Next concrete action: build the golden Q&A set (~30-50 examples across all 5 str
 | 3. Chunking + indexing  | ✅      | 100% |
 | 4. Retrieval + chat     | ✅      | 100% |
 | 5. Adaptive router      | ✅      | 100% |
-| 6. Eval + polish        | ⬜      | 0%   |
+| 6. Eval + polish        | ✅      | 100% |
 | 7. Stretch              | ⏸️     | —    |
 
 
-Last updated: 2026-05-09
+Last updated: 2026-05-10

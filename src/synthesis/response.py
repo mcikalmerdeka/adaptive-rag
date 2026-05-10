@@ -166,13 +166,22 @@ class GroundedAnswerer:
         history: Iterable[dict[str, str]] | None = None,
     ) -> AnswerResponse:
         """No-retrieval synthesis (greetings, generic knowledge)."""
+        from src.observability import get_callback_handler
+
         messages: list[Any] = [SystemMessage(content=DIRECT_SYSTEM_PROMPT)]
         if history:
             messages.extend(self._coerce_history(history))
         messages.append(HumanMessage(content=query.strip()))
 
         try:
-            ai_msg = self._llm.invoke(messages)
+            ai_msg = self._llm.invoke(
+                messages,
+                config={
+                    "callbacks": get_callback_handler(),
+                    "run_name": "synthesis.direct",
+                    "metadata": {"langfuse_tags": ["synthesis", "no_retrieval"]},
+                },
+            )
         except Exception as exc:
             logger.exception("Direct LLM call failed")
             raise SynthesisError(f"LLM synthesis failed: {exc}") from exc
@@ -207,13 +216,28 @@ class GroundedAnswerer:
             f"{context_block}\n\nUser question: {query.strip()}"
         )
 
+        from src.observability import get_callback_handler
+
         messages: list[Any] = [SystemMessage(content=SYSTEM_PROMPT)]
         if history:
             messages.extend(self._coerce_history(history))
         messages.append(HumanMessage(content=user_msg))
 
+        tag = "synthesis.with_sql" if sql else "synthesis.grounded"
         try:
-            ai_msg = self._llm.invoke(messages)
+            ai_msg = self._llm.invoke(
+                messages,
+                config={
+                    "callbacks": get_callback_handler(),
+                    "run_name": tag,
+                    "metadata": {
+                        "langfuse_tags": [
+                            "synthesis",
+                            "with_sql" if sql else "vector_only",
+                        ]
+                    },
+                },
+            )
         except Exception as exc:
             logger.exception("LLM synthesis failed")
             raise SynthesisError(f"LLM synthesis failed: {exc}") from exc

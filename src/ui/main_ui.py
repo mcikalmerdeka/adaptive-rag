@@ -5,6 +5,7 @@ from __future__ import annotations
 import gradio as gr
 from dotenv import load_dotenv
 
+from .admin_ui import render_admin_tab
 from .chat_ui import render_chat_tab
 from .ingest_ui import render_ingest_tab
 from .markdown_converter_ui import render_convert_tab
@@ -18,10 +19,11 @@ def build_app() -> gr.Blocks:
             """
             # AdaptiveRAG
 
-            **Hybrid Adaptive RAG with markdown-first ingestion, hybrid
-            search and a cross-encoder reranker.** Convert documents,
-            ingest them into Qdrant, and chat with them with grounded
-            citations. Adaptive query-time routing arrives in a later phase.
+            **Hybrid Adaptive RAG** with markdown-first ingestion, hybrid
+            search + cross-encoder reranking, query-time adaptive routing
+            (vector / SQL / hybrid / clarify), and Langfuse tracing. Convert
+            documents, ingest them into Qdrant, then chat with grounded
+            citations.
             """
         )
 
@@ -32,6 +34,8 @@ def build_app() -> gr.Blocks:
                 render_ingest_tab()
             with gr.Tab("Convert"):
                 render_convert_tab()
+            with gr.Tab("Admin"):
+                render_admin_tab()
 
         gr.Markdown(
             """

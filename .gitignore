@@ -22,6 +22,9 @@ wheels/
 # Local Qdrant storage
 qdrant_storage/
 
+# Eval reports (regenerated; HTML + JSON, can be large)
+src/eval/reports/
+
 # Other files
 other/
 error/

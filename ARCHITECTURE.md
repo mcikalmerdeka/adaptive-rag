@@ -18,10 +18,12 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 10. [Tool Layer (Read-Only SQL)](#10-tool-layer-read-only-sql)
 11. [Synthesis & Citations](#11-synthesis--citations)
 12. [Caching & Cost Control](#12-caching--cost-control)
-13. [Configuration](#13-configuration)
-14. [Implementation Status](#14-implementation-status)
-15. [Decision Log](#15-decision-log)
-16. [Future Work](#16-future-work)
+13. [Observability & Cost Tracking](#13-observability--cost-tracking)
+14. [Evaluation Framework](#14-evaluation-framework)
+15. [Configuration](#15-configuration)
+16. [Implementation Status](#16-implementation-status)
+17. [Decision Log](#17-decision-log)
+18. [Future Work](#18-future-work)
 
 ---
 
@@ -119,7 +121,9 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 | Schema validation | `pydantic>=2.9` | Structured router output, structured NL→SQL |
 | SQL | `sqlalchemy>=2.0.36` + `psycopg[binary]>=3.2.3` | Read-only Postgres tool |
 | Retry | `tenacity>=9.x` | Qwen API resilience |
-| UI | `gradio>=6.13` | Tabbed Chat / Ingest / Convert demo |
+| UI | `gradio>=6.13` | Tabbed Chat / Ingest / Convert / Admin demo |
+| Tracing | `langfuse>=4.0` | Per-turn spans, token counts, USD cost |
+| Eval | `ragas>=0.2.10` (+ `datasets>=3.0`) | Faithfulness / response relevancy / context precision |
 | Env | `python-dotenv>=1.2` | `.env` config loader |
 
 ### Explicitly avoided
@@ -183,6 +187,15 @@ adaptive-rag/
 │   ├── synthesis/                  Chunks (+ SQL) → grounded answer
 │   │   └── response.py             GroundedAnswerer + Citation parsing
 │   │
+│   ├── observability/              Tracing + cost tracking
+│   │   ├── langfuse_client.py      Singleton Langfuse + no-op span() ctx mgr
+│   │   └── cost_tracker.py         Pulls daily metrics from Langfuse REST API
+│   │
+│   ├── eval/                       Golden set + accuracy / Ragas runners
+│   │   ├── golden.jsonl            Tiny smoke golden set (~one row per strategy)
+│   │   ├── run_routing_eval.py     Router-only accuracy gate (CI-friendly)
+│   │   └── run_ragas.py            Ragas runner + JSON + HTML report
+│   │
 │   ├── cache/                      Content-hash caches
 │   │   ├── ocr_cache.py            SHA256-keyed disk cache for OCR markdown
 │   │   └── embedding_cache.py      SHA256-keyed disk cache for vectors
@@ -194,7 +207,8 @@ adaptive-rag/
 │       ├── main_ui.py              Tab composition
 │       ├── chat_ui.py              Chat tab (calls AdaptiveDispatcher)
 │       ├── ingest_ui.py            Ingest tab (multi-file upload + library)
-│       └── markdown_converter_ui.py  Convert tab (single-document preview)
+│       ├── markdown_converter_ui.py  Convert tab (single-document preview)
+│       └── admin_ui.py             Admin tab — Langfuse cost dashboard
 │
 └── docs/
     ├── check_postgres.md           DB inspection cheatsheet
@@ -465,11 +479,78 @@ Three caches on disk, all SHA256-keyed:
 
 Default location is `./.cache/`, override with `CACHE_DIR`.
 
-Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-4.1-mini`). Routing (`gpt-4.1-nano`) is roughly 1/10th the cost; SQL translation is one extra mini-call only when needed. A live cost tracker is Phase 6 work.
+Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-4.1-mini`). Routing (`gpt-4.1-nano`) is roughly 1/10th the cost; SQL translation is one extra mini-call only when needed. The live numbers are tracked by Langfuse — see the next section.
 
 ---
 
-## 13. Configuration
+## 13. Observability & Cost Tracking
+
+Tracing is fully optional. When `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are unset every helper in `src/observability/` is a no-op stub, so the rest of the application code is not branched on "is tracing on?".
+
+### Span tree per chat turn
+
+`AdaptiveDispatcher.answer()` opens one parent span and the helpers open children:
+
+```
+chat.turn (input=query, history_len)
+├── router.classify       (input=query; output={strategy, reasoning, vector_query, sql_intent})
+├── retrieval.hybrid_search (input=query; metadata={fused_count, rerank_ms, prefetch_k, top_k, model})
+├── tool.sql_execute      (input=intent;  output={sql, row_count, columns, rows_preview})
+└── synthesis.{direct|grounded} (input=ctx_summary; output={answer, cited_indices, cited_db})
+```
+
+The LangChain `CallbackHandler` is also passed into every `ChatOpenAI.invoke(...)` (router, NL→SQL, both synthesis modes), so each LLM call appears as a `GENERATION` observation with token counts + the model price → USD cost computed server-side by Langfuse. No price table is duplicated client-side.
+
+`flush_traces()` is called at the end of each turn so spans appear in the dashboard within a second; we don't rely on the background flush thread to survive a Gradio request boundary.
+
+### Cost tracker
+
+`src/observability/cost_tracker.py` is a tiny `httpx`-based reader for Langfuse's `/api/public/metrics/daily` endpoint. It returns a `CostSummary` dataclass with:
+
+- Total traces / observations / tokens / USD cost in the window
+- Per-model breakdown (calls, in/out tokens, cost)
+- Per-day breakdown
+
+The Admin tab renders the same summary as a Gradio markdown view with a 24h / 7d / 30d window selector. CLI:
+
+```bash
+uv run python -m src.observability.cost_tracker --days 7
+```
+
+---
+
+## 14. Evaluation Framework
+
+Two complementary scripts. Both consume the same golden set and write reports under `src/eval/reports/`.
+
+### Golden set — `src/eval/golden.jsonl`
+
+The default file ships as a **token-cheap smoke set**: about five rows (one per strategy). Add more rows to `golden.jsonl` anytime you want deeper coverage — there is no required size.
+
+Each row has `id`, `query`, `expected_strategy`, optional `answer_must_contain` / `expected_sql_keywords`, and `notes`.
+
+### Router-only eval — `run_routing_eval.py`
+
+Hits the `AdaptiveRouter` against every example without running retrieval / SQL / synthesis. Reports overall accuracy, per-strategy breakdown, latency, and a confusion matrix. Exits non-zero if accuracy drops below `--threshold` (default `0.85`) — drop into CI to catch router-prompt regressions cheaply.
+
+### Full pipeline + Ragas — `run_ragas.py`
+
+For every example whose `expected_strategy` is `vector_only` or `hybrid`, runs the full dispatcher and feeds the (query, answer, retrieved chunks) triple into Ragas:
+
+- `Faithfulness` — claims in the answer are grounded in retrieved context
+- `ResponseRelevancy` — the answer addresses the actual question
+- `LLMContextPrecisionWithoutReference` — the retrieved chunks were relevant
+
+`LLMContextRecall` is intentionally **not** included yet — it requires a hand-written reference answer per question, and we only have weak `answer_must_contain` proxies. Adding a `reference_answer` field to the golden set unlocks recall later.
+
+Outputs:
+
+- `src/eval/reports/ragas_<timestamp>.json` — raw scores per row
+- `src/eval/reports/ragas_<timestamp>.html` — self-contained summary report
+
+---
+
+## 15. Configuration
 
 Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclass loaded once from `.env` via `python-dotenv`. Some highlights:
 
@@ -493,11 +574,14 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | `SQL_DATABASE_URL` | (unset) | Leave unset to disable `sql_only` / `hybrid` strategies |
 | `SQL_QUERY_TIMEOUT_SEC` | `5` | Per-query Postgres timeout |
 | `SQL_ROW_LIMIT` | `200` | Implicit `LIMIT N` injection |
+| `LANGFUSE_PUBLIC_KEY` | (unset) | Set both Langfuse keys to enable tracing — app is a no-op tracer when missing |
+| `LANGFUSE_SECRET_KEY` | (unset) | — |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Override for the US region or self-hosted |
 | `CACHE_DIR` | `./.cache` | OCR + embedding caches |
 
 ---
 
-## 14. Implementation Status
+## 16. Implementation Status
 
 | Phase | Status | Description |
 |---|---|---|
@@ -507,14 +591,14 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | 3. Chunking + indexing | ✅ | Header-aware chunks, hybrid Qdrant collection, dedup |
 | 4. Retrieval + chat | ✅ | Hybrid search + RRF + FlashRank + grounded answers with `[n]` citations |
 | 5. Adaptive router + SQL | ✅ | Five-strategy router, read-only SQL tool, `[DB]` citations |
-| 6. Eval + tracing + polish | ⬜ | Ragas golden set, Langfuse, cost tracker, docs |
+| 6. Eval + tracing + polish | ✅ | Langfuse spans, cost dashboard, routing-accuracy gate, Ragas runner with HTML reports |
 | 7. Stretch | ⏸️ | C-RAG self-reflection, multi-hop, MCP server, web fallback |
 
 See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance criteria.
 
 ---
 
-## 15. Decision Log
+## 17. Decision Log
 
 | Decision | Chosen | Rejected | Reason |
 |---|---|---|---|
@@ -533,20 +617,14 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 | File watching | Manual upload | watchdog filesystem watcher | UI-driven flow is enough; watcher is feature creep |
 | DB sync to vectors | Live SQL tool, query at runtime | CDC (Debezium et al.) | Core principle: never embed structured data |
 | Eval | Ragas + custom routing-accuracy metric | None / vibes-based | Portfolio projects without metrics look unfinished |
-| Tracing | Langfuse | Prometheus + Grafana + Jaeger | LLM-native, single signup, free tier |
+| Tracing | Langfuse | LangSmith, Prometheus + Grafana + Jaeger | LLM-native, model-/framework-agnostic, MIT-licensed core, generous free tier (50k events/month), self-hosting available — sidesteps the LangSmith vendor lock-in concern |
+| Eval reference answers | Skipped for v1 | Hand-written gold answers per row | Ragas Faithfulness / Response Relevancy / Context Precision don't need them; recall does. Add a `reference_answer` field to the golden set when the synthesis prompt is stable enough that recall scores are trustworthy. |
+| Cost table source | Langfuse server-side computation | Maintain price table in repo | Model prices change; Langfuse keeps theirs current. We just read totals back via REST. |
+| Tracing default | Disabled (no-op stubs) | Always-on with warnings | Cleaner OSS UX — works without signup; opt-in by setting two env vars |
 
 ---
 
-## 16. Future Work
-
-### Phase 6 — Eval, tracing, polish
-
-- `src/eval/golden.jsonl` — 30–50 Q&A pairs across all five strategies, including adversarial / edge cases.
-- `src/eval/ragas_runner.py` — faithfulness, answer relevancy, context precision, context recall + an HTML report.
-- Routing-accuracy metric on the golden set, gated in CI (fail on >5% regression).
-- Langfuse spans on every dispatcher stage (router → retrieval → SQL → synthesis), including token counts and per-call cost.
-- `src/observability/cost_tracker.py` + a Gradio admin tab showing daily / weekly cost breakdown.
-- README polish — demo gif, screenshots, eval scores baked in.
+## 18. Future Work
 
 ### Phase 7 — Stretch
 

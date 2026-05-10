@@ -109,10 +109,19 @@ class AdaptiveRouter:
                 0.0,
             )
 
+        from src.observability import get_callback_handler
+
         messages = self._build_messages(query, history)
         t0 = time.perf_counter()
         try:
-            decision: RouterDecision = self._llm.invoke(messages)
+            decision: RouterDecision = self._llm.invoke(
+                messages,
+                config={
+                    "callbacks": get_callback_handler(),
+                    "run_name": "router.llm",
+                    "metadata": {"langfuse_tags": ["router"]},
+                },
+            )
         except Exception as exc:
             logger.exception("Router LLM call failed; defaulting to vector_only")
             elapsed = (time.perf_counter() - t0) * 1000

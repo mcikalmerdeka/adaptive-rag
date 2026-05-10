@@ -202,8 +202,17 @@ class SqlTool:
                 ),
             },
         ]
+        from src.observability import get_callback_handler
+
         try:
-            output: _SqlOutput = self._llm.invoke(messages)
+            output: _SqlOutput = self._llm.invoke(
+                messages,
+                config={
+                    "callbacks": get_callback_handler(),
+                    "run_name": "sql_tool.translate",
+                    "metadata": {"langfuse_tags": ["sql_tool", "nl2sql"]},
+                },
+            )
         except Exception as exc:
             raise SqlToolError(f"LLM SQL translation failed: {exc}") from exc
 

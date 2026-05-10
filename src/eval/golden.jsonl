@@ -1,0 +1,5 @@
+{"id": "vec-01", "query": "What does the story say about aliens arriving in Jakarta?", "expected_strategy": "vector_only", "answer_must_contain": ["alien", "Jakarta"], "notes": "Narrative from indexed corpus."}
+{"id": "sql-01", "query": "How many refunds were issued in the last 30 days?", "expected_strategy": "sql_only", "expected_sql_keywords": ["count", "refunds"], "notes": "DB aggregate."}
+{"id": "hyb-01", "query": "Summarize the indexed story about Jakarta and tell me the total number of refunds we've processed", "expected_strategy": "hybrid", "answer_must_contain": ["Jakarta"], "expected_sql_keywords": ["count", "refunds"], "notes": "Docs + SQL."}
+{"id": "non-01", "query": "Hi there!", "expected_strategy": "no_retrieval", "notes": "Greeting."}
+{"id": "clr-01", "query": "What about last quarter?", "expected_strategy": "clarify", "notes": "Ambiguous follow-up."}

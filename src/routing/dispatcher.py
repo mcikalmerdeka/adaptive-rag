@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from src.observability import flush_traces, span
 from src.retrieval import RetrievalPipeline, RetrievedChunk
 from src.synthesis import AnswerResponse, GroundedAnswerer, SynthesisError
 from src.tools import SqlResult, SqlTool, SqlToolError
@@ -105,10 +106,67 @@ class AdaptiveDispatcher:
         history: Iterable[dict[str, str]] | None = None,
     ) -> AdaptiveAnswer:
         history_list = list(history) if history else []
+
+        # One Langfuse trace per chat turn. Children (router / retrieval /
+        # SQL / synthesis) inherit the trace context automatically.
+        with span(
+            "chat.turn",
+            input={"query": query, "history_len": len(history_list)},
+            metadata={"history_len": len(history_list)},
+        ) as turn_span:
+            try:
+                result = self._answer_inner(query, history_list)
+                turn_span.update(
+                    output={
+                        "answer": result.answer,
+                        "strategy": result.strategy.value,
+                    },
+                    metadata={
+                        "strategy": result.strategy.value,
+                        "reasoning": result.decision.reasoning,
+                        "routing_ms": result.timings.routing_ms,
+                        "retrieval_ms": result.timings.retrieval_ms,
+                        "sql_ms": result.timings.sql_ms,
+                        "synthesis_ms": result.timings.synthesis_ms,
+                        "total_ms": result.timings.total_ms,
+                        "n_chunks": len(result.chunks),
+                        "sql_executed": (
+                            result.sql_result.sql if result.sql_result else None
+                        ),
+                        "notes": result.notes or None,
+                    },
+                )
+                return result
+            finally:
+                # Short-lived script — flush so traces don't sit in the
+                # background queue across a Gradio request boundary.
+                flush_traces()
+
+    def _answer_inner(
+        self,
+        query: str,
+        history_list: list[dict[str, str]],
+    ) -> AdaptiveAnswer:
         sql_tool = self._get_sql_tool()
         router = self._get_router(sql_tool)
 
-        decision, routing_ms = router.classify(query, history=history_list)
+        with span(
+            "router.classify",
+            input={"query": query},
+            metadata={"sql_available": sql_tool is not None},
+        ) as router_span:
+            decision, routing_ms = router.classify(query, history=history_list)
+            router_span.update(
+                output={
+                    "strategy": decision.strategy.value,
+                    "reasoning": decision.reasoning,
+                    "vector_query": decision.vector_query,
+                    "sql_intent": decision.sql_intent,
+                    "clarification_question": decision.clarification_question,
+                },
+                metadata={"latency_ms": routing_ms},
+            )
+
         timings = StageTimings(routing_ms=routing_ms)
         notes: list[str] = []
 
@@ -181,12 +239,20 @@ class AdaptiveDispatcher:
         notes: list[str],
     ) -> AdaptiveAnswer:
         synth = self._get_synth()
-        t0 = time.perf_counter()
-        try:
-            response = synth.answer_direct(query, history=history)
-        except SynthesisError as exc:
-            raise DispatchError(str(exc)) from exc
-        timings.synthesis_ms = (time.perf_counter() - t0) * 1000
+        with span("synthesis.direct", input={"query": query}) as synth_span:
+            t0 = time.perf_counter()
+            try:
+                response = synth.answer_direct(query, history=history)
+            except SynthesisError as exc:
+                raise DispatchError(str(exc)) from exc
+            timings.synthesis_ms = (time.perf_counter() - t0) * 1000
+            synth_span.update(
+                output={"answer": response.answer},
+                metadata={
+                    "model": response.model,
+                    "latency_ms": timings.synthesis_ms,
+                },
+            )
         return AdaptiveAnswer(
             answer=response.answer,
             strategy=Strategy.NO_RETRIEVAL,
@@ -202,11 +268,33 @@ class AdaptiveDispatcher:
         query: str,
         timings: StageTimings,
     ) -> list[RetrievedChunk]:
+        from src.config import settings
+
         retrieval = self._get_retrieval()
         search_query = decision.effective_vector_query(query)
-        report = retrieval.retrieve(search_query)
-        timings.retrieval_ms = report.fused_ms + report.rerank_ms
-        return report.chunks
+        with span(
+            "retrieval.hybrid_search",
+            input={"query": search_query, "rephrased": search_query != query},
+        ) as retr_span:
+            report = retrieval.retrieve(search_query)
+            timings.retrieval_ms = report.fused_ms + report.rerank_ms
+            retr_span.update(
+                output={
+                    "n_chunks": len(report.chunks),
+                    "top_labels": [c.citation_label() for c in report.chunks[:5]],
+                },
+                metadata={
+                    "fused_count": report.fused_count,
+                    "final_count": report.final_count,
+                    "reranker_used": report.reranker_used,
+                    "fused_ms": report.fused_ms,
+                    "rerank_ms": report.rerank_ms,
+                    "prefetch_k": settings.RETRIEVAL_PREFETCH_K,
+                    "rerank_top_k": settings.RERANK_TOP_K,
+                    "reranker_model": settings.RERANKER_MODEL,
+                },
+            )
+            return report.chunks
 
     def _do_sql(
         self,
@@ -221,15 +309,33 @@ class AdaptiveDispatcher:
             return None
 
         intent = decision.effective_sql_intent(query)
-        t0 = time.perf_counter()
-        try:
-            result = sql_tool.answer(intent)
-        except SqlToolError as exc:
-            logger.warning(f"SQL tool failed: {exc}")
-            notes.append(f"SQL step failed: {exc}")
-            return None
-        finally:
-            timings.sql_ms = (time.perf_counter() - t0) * 1000
+        with span("tool.sql_execute", input={"intent": intent}) as sql_span:
+            t0 = time.perf_counter()
+            try:
+                result = sql_tool.answer(intent)
+            except SqlToolError as exc:
+                logger.warning(f"SQL tool failed: {exc}")
+                notes.append(f"SQL step failed: {exc}")
+                sql_span.update(
+                    output={"error": str(exc)},
+                    metadata={"failed": True},
+                )
+                return None
+            finally:
+                timings.sql_ms = (time.perf_counter() - t0) * 1000
+            sql_span.update(
+                output={
+                    "sql": result.sql,
+                    "row_count": result.row_count,
+                    "columns": result.columns,
+                    "rows_preview": result.rows[:5],
+                },
+                metadata={
+                    "elapsed_ms": result.elapsed_ms,
+                    "truncated": result.truncated,
+                    "row_count": result.row_count,
+                },
+            )
         return result
 
     def _handle_synthesis(
@@ -264,17 +370,37 @@ class AdaptiveDispatcher:
                 notes=notes,
             )
 
-        t0 = time.perf_counter()
-        try:
-            if sql_result is not None:
-                response = synth.answer_with_sql(
-                    query, chunks, sql_result, history=history
-                )
-            else:
-                response = synth.answer(query, chunks, history=history)
-        except SynthesisError as exc:
-            raise DispatchError(str(exc)) from exc
-        timings.synthesis_ms = (time.perf_counter() - t0) * 1000
+        with span(
+            "synthesis.grounded",
+            input={
+                "query": query,
+                "n_chunks": len(chunks),
+                "has_sql": sql_result is not None,
+            },
+        ) as synth_span:
+            t0 = time.perf_counter()
+            try:
+                if sql_result is not None:
+                    response = synth.answer_with_sql(
+                        query, chunks, sql_result, history=history
+                    )
+                else:
+                    response = synth.answer(query, chunks, history=history)
+            except SynthesisError as exc:
+                raise DispatchError(str(exc)) from exc
+            timings.synthesis_ms = (time.perf_counter() - t0) * 1000
+            synth_span.update(
+                output={
+                    "answer": response.answer,
+                    "cited_indices": response.cited_indices,
+                    "cited_db": response.cited_db,
+                },
+                metadata={
+                    "model": response.model,
+                    "latency_ms": timings.synthesis_ms,
+                    "n_citations": len(response.citations),
+                },
+            )
 
         return AdaptiveAnswer(
             answer=response.answer,

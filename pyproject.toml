@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "docling>=2.92.0",
+    "datasets>=3.0.0",
     "fastembed>=0.4.2",
     "flashrank>=0.2.9",
     "gradio>=6.13.0",
@@ -15,6 +16,7 @@ dependencies = [
     "langchain-openai>=1.2.1",
     "langchain-qdrant>=1.1.0",
     "langchain-text-splitters>=1.1.2",
+    "langfuse>=4.0.0",
     "openai>=2.33.0",
     "pillow>=10.4.0",
     "psycopg[binary]>=3.2.3",
@@ -22,6 +24,7 @@ dependencies = [
     "pypdfium2>=4.30.0",
     "python-dotenv>=1.2.2",
     "qdrant-client>=1.12.0",
+    "ragas>=0.2.10",
     "sqlalchemy>=2.0.36",
     "tenacity>=9.0.0",
 ]

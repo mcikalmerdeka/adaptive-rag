@@ -4,7 +4,7 @@
 
 This project intelligently routes data and queries: documents go to a hybrid (dense + sparse) vector store, structured data is queried live via tools, and the LLM picks the right strategy *per query* — not per file extension.
 
-> Phased build. We're at **Phase 5** — adaptive query routing is live. Each question is classified into one of `no_retrieval | vector_only | sql_only | hybrid | clarify`, then dispatched. Eval + observability come in Phase 6.
+> Phased build. **Phase 6 complete** — Langfuse tracing wraps every router / retrieval / SQL / synthesis call, the Admin tab shows live token + cost rollups, and `src/eval/` has both a router-only accuracy gate and a Ragas runner with HTML reports.
 
 See:
 - `ARCHITECTURE.md` — full system design and rationale
@@ -92,6 +92,12 @@ See:
   - `SQL_DATABASE_URL`, `SQL_QUERY_TIMEOUT_SEC`, `SQL_ROW_LIMIT` (Phase 5)
   - `DENSE_MODEL`, `SPARSE_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, etc.
 
+### Phase 6 — Tracing, evaluation, cost tracking
+- **Langfuse tracing** for every chat turn — one parent `chat.turn` span with child spans `router.classify`, `retrieval.hybrid_search`, `tool.sql_execute`, `synthesis.{direct,grounded}`. The `langchain.CallbackHandler` is also passed into every `ChatOpenAI.invoke(...)`, so token counts and USD costs land in Langfuse automatically. Tracing is **completely no-op when `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are unset** — the spans are stubs and the rest of the code is unchanged.
+- **Admin tab** in the Gradio app — live cost / token / trace counts pulled from Langfuse's `/api/public/metrics/daily` endpoint. Selectable window (last 24 h / 7 d / 30 d), per-model breakdown, per-day breakdown. Friendly empty-state when keys aren't configured.
+- **Router-only golden eval** (`uv run python -m src.eval.run_routing_eval`) — runs the router against `src/eval/golden.jsonl` (a **small smoke set**, one example per strategy, to save tokens). Writes `src/eval/reports/routing.json`. Add `--threshold 0.85` if you want a non-zero exit on regressions (default: never fail — report only).
+- **Ragas eval** (`uv run python -m src.eval.run_ragas`) — runs the full dispatcher on the retrieval-bearing examples and scores them with `Faithfulness`, `ResponseRelevancy`, `LLMContextPrecisionWithoutReference`. Emits both a JSON dump and a self-contained HTML report under `src/eval/reports/ragas_<timestamp>.html`.
+
 ## Project structure
 
 ```
@@ -133,6 +139,13 @@ adaptive-rag/
     │   └── sql_tool.py             # NL→SQL with read-only safety guards
     ├── synthesis/                  # Chunks (+ SQL) → grounded answer + citations
     │   └── response.py             # GroundedAnswerer (ChatOpenAI)
+    ├── observability/              # Tracing + cost tracking (Langfuse)
+    │   ├── langfuse_client.py      # Singleton + no-op span() context manager
+    │   └── cost_tracker.py         # Pulls daily metrics from Langfuse REST API
+    ├── eval/                       # Golden set + accuracy / Ragas runners
+    │   ├── golden.jsonl            # Tiny smoke golden set (~5 rows; extend as needed)
+    │   ├── run_routing_eval.py     # Router-only accuracy gate
+    │   └── run_ragas.py            # Faithfulness / relevancy / precision + HTML
     ├── cache/
     │   ├── ocr_cache.py            # SHA256 disk cache for OCR markdown
     │   └── embedding_cache.py      # SHA256 disk cache for embeddings
@@ -142,7 +155,8 @@ adaptive-rag/
         ├── main_ui.py              # Tab composition
         ├── chat_ui.py              # Chat tab (talks to AdaptiveDispatcher)
         ├── ingest_ui.py            # Ingest tab
-        └── markdown_converter_ui.py # Convert tab
+        ├── markdown_converter_ui.py # Convert tab
+        └── admin_ui.py             # Admin tab — Langfuse cost dashboard
 ```
 
 ## Setup
@@ -191,6 +205,9 @@ Open `http://localhost:7860`.
 | `SQL_ROW_LIMIT` (optional, default `200`) | Implicit `LIMIT N` injected when the SQL doesn't have one | — |
 | `ROUTER_MODEL` (optional, default `gpt-4.1-nano`) | Router classifier model | — |
 | `SQL_MODEL` (optional, default `gpt-4.1-mini`) | NL→SQL translator model | — |
+| `LANGFUSE_PUBLIC_KEY` (optional) | Langfuse tracing — set both to enable. App is a no-op tracer when missing. | https://cloud.langfuse.com/ |
+| `LANGFUSE_SECRET_KEY` (optional) | Same as above | — |
+| `LANGFUSE_HOST` (optional, default `https://cloud.langfuse.com`) | Set to `https://us.cloud.langfuse.com` for the US region or your self-hosted URL | — |
 
 ## Using the app
 
@@ -200,6 +217,24 @@ Open `http://localhost:7860`.
 
 **Convert tab** — single-document preview; pick a file, optionally force Qwen for PDFs, see the markdown and download.
 
+**Admin tab** — token + USD cost rollups pulled from Langfuse. Disabled-state instructions when `LANGFUSE_*` keys are missing.
+
+## Evaluation
+
+```bash
+# Router-only accuracy (cheap, ~10 LLM calls). Exits non-zero if accuracy
+# drops below 85% — drop this into CI to catch prompt regressions.
+uv run python -m src.eval.run_routing_eval
+
+# Full pipeline through Ragas (faithfulness / response relevancy /
+# context precision). Generates JSON + a self-contained HTML report
+# under src/eval/reports/.
+uv run python -m src.eval.run_ragas
+
+# Quick cost snapshot from the CLI (or use the Admin tab).
+uv run python -m src.observability.cost_tracker --days 7
+```
+
 ## Roadmap
 
 - ✅ Phase 1: Docling baseline document conversion
@@ -207,8 +242,8 @@ Open `http://localhost:7860`.
 - ✅ Phase 3: Header-aware chunking + hybrid (dense + BM25) Qdrant indexing
 - ✅ Phase 4: Hybrid retrieval + FlashRank reranker + grounded chat with citations
 - ✅ Phase 5: Adaptive query router + read-only SQL tool over a demo Postgres warehouse
-- ⬜ Phase 6: Ragas evaluation, Langfuse tracing, cost tracker
-- ⏸️ Phase 7: C-RAG self-reflection, MCP server surface, web fallback
+- ✅ Phase 6: Langfuse tracing + cost dashboard + routing eval + Ragas runner
+- ⏸️ Phase 7: C-RAG self-reflection, MCP server surface, web fallback, streaming
 
 Full plan in `PROJECT_PLAN.md`.
 

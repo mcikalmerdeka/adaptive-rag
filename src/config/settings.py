@@ -90,8 +90,18 @@ class Settings:
     SQL_QUERY_TIMEOUT_SEC: int
     SQL_ROW_LIMIT: int
 
+    # ---- Langfuse (Phase 6) ----
+    LANGFUSE_PUBLIC_KEY: str | None
+    LANGFUSE_SECRET_KEY: str | None
+    LANGFUSE_HOST: str
+
     # ---- Cache directories ----
     CACHE_DIR: Path
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        """True when both Langfuse keys are present."""
+        return bool(self.LANGFUSE_PUBLIC_KEY and self.LANGFUSE_SECRET_KEY)
 
 
 def _load() -> Settings:
@@ -119,6 +129,9 @@ def _load() -> Settings:
         SQL_DATABASE_URL=_env_optional("SQL_DATABASE_URL"),
         SQL_QUERY_TIMEOUT_SEC=_env_int("SQL_QUERY_TIMEOUT_SEC", 5),
         SQL_ROW_LIMIT=_env_int("SQL_ROW_LIMIT", 200),
+        LANGFUSE_PUBLIC_KEY=_env_optional("LANGFUSE_PUBLIC_KEY"),
+        LANGFUSE_SECRET_KEY=_env_optional("LANGFUSE_SECRET_KEY"),
+        LANGFUSE_HOST=_env_str("LANGFUSE_HOST", "https://cloud.langfuse.com"),
         CACHE_DIR=Path(_env_str("CACHE_DIR", "./.cache")),
     )
 
