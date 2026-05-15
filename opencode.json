@@ -52,7 +52,7 @@
       "url": "https://mcp.neon.tech/mcp",
       "enabled": true,
       "headers": {
-        "Authorization": "Bearer {env:NEON_API_KEY}"
+        "Authorization": "Bearer {env:NEON_MCP_API_KEY}"
       }
     },
     "eraser": {
