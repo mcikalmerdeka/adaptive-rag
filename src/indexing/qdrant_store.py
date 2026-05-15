@@ -38,7 +38,42 @@ class QdrantStoreError(Exception):
 
 
 class QdrantStore:
-    """Hybrid (dense + sparse) Qdrant store with metadata-aware dedup."""
+    """Hybrid (dense + sparse) Qdrant store with metadata-aware dedup.
+
+    **Singleton per connection.** Embedded Qdrant uses a file lock on the
+    storage directory, so multiple instances pointing at the same path
+    will crash with ``AlreadyLocked``. This class ensures only one
+    ``QdrantClient`` (and one ``QdrantVectorStore``) exists for each
+    unique combination of (url, api_key, path, collection_name).
+    """
+
+    _instances: dict[str, "QdrantStore"] = {}
+
+    def __new__(
+        cls,
+        collection_name: str | None = None,
+        url: str | None = None,
+        api_key: str | None = None,
+        path: str | Path | None = None,
+        dense_embeddings: Embeddings | None = None,
+        sparse_embeddings: FastEmbedSparse | None = None,
+        dense_size: int | None = None,
+    ) -> "QdrantStore":
+        # Build a deterministic key from the connection params.
+        key_parts = [
+            collection_name or settings.QDRANT_COLLECTION,
+            url or settings.QDRANT_URL or "",
+            api_key or settings.QDRANT_API_KEY or "",
+            str(path or settings.QDRANT_PATH),
+        ]
+        key = "|".join(key_parts)
+
+        if key not in cls._instances:
+            instance = super().__new__(cls)
+            cls._instances[key] = instance
+            instance._singleton_key = key
+            instance._initialized = False
+        return cls._instances[key]
 
     def __init__(
         self,
@@ -51,6 +86,11 @@ class QdrantStore:
         sparse_embeddings: FastEmbedSparse | None = None,
         dense_size: int | None = None,
     ) -> None:
+        # Guard against re-initialising a singleton that already exists.
+        # (``__new__`` sets ``_initialized = False`` on first creation.)
+        if getattr(self, "_initialized", False):
+            return
+
         self.collection_name = collection_name or settings.QDRANT_COLLECTION
         self._dense_size = dense_size or settings.DENSE_SIZE
 
@@ -78,6 +118,7 @@ class QdrantStore:
             f"QdrantStore ready: collection='{self.collection_name}', "
             f"backend='{self._backend_label}', dense_dim={self._dense_size}"
         )
+        self._initialized = True
 
     # ---- public API ---------------------------------------------------
 
