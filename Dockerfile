@@ -23,28 +23,8 @@ RUN uv pip install --system -e "."
 ENV HF_HUB_DISABLE_SYMLINKS=1
 ENV HF_HOME=/app/.cache/huggingface
 ENV FLASHRANK_HOME=/app/.cache/flashrank
-RUN python -c "
-import logging
-logging.basicConfig(level=logging.INFO)
-
-# Trigger Docling model download
-print('Pre-downloading Docling models...')
-from src.core.converter import MarkdownConverterService
-MarkdownConverterService()
-print('Docling models cached.')
-
-# Trigger FlashRank model download
-print('Pre-downloading FlashRank model...')
-from src.retrieval.reranker import Reranker
-Reranker()
-print('FlashRank model cached.')
-
-# Trigger FastEmbed BM25 tokenizer download
-print('Pre-downloading FastEmbed BM25 tokenizer...')
-from fastembed.sparse.sparse_embedding import SparseTextEmbedding
-SparseTextEmbedding(model_name='Qdrant/bm25')
-print('FastEmbed tokenizer cached.')
-"
+COPY scripts/preload_models.py ./scripts/
+RUN python scripts/preload_models.py
 
 # ---- production stage: lean runtime image ----------------------------------
 FROM python:3.12-slim
