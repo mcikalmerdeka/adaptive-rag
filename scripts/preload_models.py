@@ -25,7 +25,7 @@ print("FlashRank model cached.")
 
 # Trigger FastEmbed BM25 tokenizer download
 print("Pre-downloading FastEmbed BM25 tokenizer...")
-from fastembed.sparse.sparse_embedding import SparseTextEmbedding  # noqa: E402
+from fastembed import SparseTextEmbedding  # noqa: E402
 
 SparseTextEmbedding(model_name="Qdrant/bm25")
 print("FastEmbed tokenizer cached.")
