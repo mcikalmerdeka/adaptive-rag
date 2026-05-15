@@ -4,7 +4,7 @@
 
 This project intelligently routes data and queries: documents go to a hybrid (dense + sparse) vector store, structured data is queried live via tools, and the LLM picks the right strategy *per query* — not per file extension.
 
-> Phased build. **Phase 6 complete** — Langfuse tracing wraps every router / retrieval / SQL / synthesis call, the Admin tab shows live token + cost rollups, and `src/eval/` has both a router-only accuracy gate and a Ragas runner with HTML reports.
+> Phased build. **Phase 6 complete** — Langfuse tracing wraps every router / retrieval / SQL / synthesis call, the Admin tab shows live token + cost rollups, and `src/eval/` has both a router-only accuracy gate and a DeepEval runner with HTML reports.
 
 See:
 - `ARCHITECTURE.md` — full system design and rationale
@@ -96,7 +96,7 @@ See:
 - **Langfuse tracing** for every chat turn — one parent `chat.turn` span with child spans `router.classify`, `retrieval.hybrid_search`, `tool.sql_execute`, `synthesis.{direct,grounded}`. The `langchain.CallbackHandler` is also passed into every `ChatOpenAI.invoke(...)`, so token counts and USD costs land in Langfuse automatically. Tracing is **completely no-op when `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are unset** — the spans are stubs and the rest of the code is unchanged.
 - **Admin tab** in the Gradio app — live cost / token / trace counts pulled from Langfuse's `/api/public/metrics/daily` endpoint. Selectable window (last 24 h / 7 d / 30 d), per-model breakdown, per-day breakdown. Friendly empty-state when keys aren't configured.
 - **Router-only golden eval** (`uv run python -m src.eval.run_routing_eval`) — runs the router against `src/eval/golden.jsonl` (a **small smoke set**, one example per strategy, to save tokens). Writes `src/eval/reports/routing.json`. Add `--threshold 0.85` if you want a non-zero exit on regressions (default: never fail — report only).
-- **Ragas eval** (`uv run python -m src.eval.run_ragas`) — runs the full dispatcher on the retrieval-bearing examples and scores them with `Faithfulness`, `ResponseRelevancy`, `LLMContextPrecisionWithoutReference`. Emits both a JSON dump and a self-contained HTML report under `src/eval/reports/ragas_<timestamp>.html`.
+- **DeepEval eval** (`uv run python -m src.eval.run_deepeval`) — runs the full dispatcher on the retrieval-bearing examples and scores them with `Faithfulness`, `AnswerRelevancy`, `ContextualRelevancy`. Emits both a JSON dump and a self-contained HTML report under `src/eval/reports/deepeval_<timestamp>.html`.
 
 ## Project structure
 
@@ -142,10 +142,10 @@ adaptive-rag/
     ├── observability/              # Tracing + cost tracking (Langfuse)
     │   ├── langfuse_client.py      # Singleton + no-op span() context manager
     │   └── cost_tracker.py         # Pulls daily metrics from Langfuse REST API
-    ├── eval/                       # Golden set + accuracy / Ragas runners
-    │   ├── golden.jsonl            # Tiny smoke golden set (~5 rows; extend as needed)
+    ├── eval/                       # Golden set + accuracy / DeepEval runners
+    │   ├── golden.jsonl            # Tiny smoke golden set (~10 rows; extend as needed)
     │   ├── run_routing_eval.py     # Router-only accuracy gate
-    │   └── run_ragas.py            # Faithfulness / relevancy / precision + HTML
+    │   └── run_deepeval.py         # Faithfulness / relevancy / contextual relevancy + HTML
     ├── cache/
     │   ├── ocr_cache.py            # SHA256 disk cache for OCR markdown
     │   └── embedding_cache.py      # SHA256 disk cache for embeddings
@@ -226,10 +226,11 @@ Open `http://localhost:7860`.
 # drops below 85% — drop this into CI to catch prompt regressions.
 uv run python -m src.eval.run_routing_eval
 
-# Full pipeline through Ragas (faithfulness / response relevancy /
-# context precision). Generates JSON + a self-contained HTML report
+# Full pipeline through DeepEval (faithfulness / answer relevancy /
+# contextual relevancy). Generates JSON + a self-contained HTML report
 # under src/eval/reports/.
-uv run python -m src.eval.run_ragas
+uv run python -m src.eval.run_deepeval
+uv run python -m src.eval.run_deepeval --limit 1  # cheapest: one row only
 
 # Quick cost snapshot from the CLI (or use the Admin tab).
 uv run python -m src.observability.cost_tracker --days 7
@@ -242,7 +243,7 @@ uv run python -m src.observability.cost_tracker --days 7
 - ✅ Phase 3: Header-aware chunking + hybrid (dense + BM25) Qdrant indexing
 - ✅ Phase 4: Hybrid retrieval + FlashRank reranker + grounded chat with citations
 - ✅ Phase 5: Adaptive query router + read-only SQL tool over a demo Postgres warehouse
-- ✅ Phase 6: Langfuse tracing + cost dashboard + routing eval + Ragas runner
+- ✅ Phase 6: Langfuse tracing + cost dashboard + routing eval + DeepEval runner
 - ⏸️ Phase 7: C-RAG self-reflection, MCP server surface, web fallback, streaming
 
 Full plan in `PROJECT_PLAN.md`.

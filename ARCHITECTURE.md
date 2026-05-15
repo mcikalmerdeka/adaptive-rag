@@ -123,7 +123,7 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 | Retry | `tenacity>=9.x` | Qwen API resilience |
 | UI | `gradio>=6.13` | Tabbed Chat / Ingest / Convert / Admin demo |
 | Tracing | `langfuse>=4.0` | Per-turn spans, token counts, USD cost |
-| Eval | `ragas>=0.2.10` (+ `datasets>=3.0`) | Faithfulness / response relevancy / context precision |
+| Eval | `deepeval>=3.0` | Faithfulness / answer relevancy / contextual relevancy |
 | Env | `python-dotenv>=1.2` | `.env` config loader |
 
 ### Explicitly avoided
@@ -191,10 +191,10 @@ adaptive-rag/
 │   │   ├── langfuse_client.py      Singleton Langfuse + no-op span() ctx mgr
 │   │   └── cost_tracker.py         Pulls daily metrics from Langfuse REST API
 │   │
-│   ├── eval/                       Golden set + accuracy / Ragas runners
+│   ├── eval/                       Golden set + accuracy / DeepEval runners
 │   │   ├── golden.jsonl            Tiny smoke golden set (~one row per strategy)
 │   │   ├── run_routing_eval.py     Router-only accuracy gate (CI-friendly)
-│   │   └── run_ragas.py            Ragas runner + JSON + HTML report
+│   │   └── run_deepeval.py         DeepEval runner + JSON + HTML report
 │   │
 │   ├── cache/                      Content-hash caches
 │   │   ├── ocr_cache.py            SHA256-keyed disk cache for OCR markdown
@@ -533,20 +533,20 @@ Each row has `id`, `query`, `expected_strategy`, optional `answer_must_contain` 
 
 Hits the `AdaptiveRouter` against every example without running retrieval / SQL / synthesis. Reports overall accuracy, per-strategy breakdown, latency, and a confusion matrix. Exits non-zero if accuracy drops below `--threshold` (default `0.85`) — drop into CI to catch router-prompt regressions cheaply.
 
-### Full pipeline + Ragas — `run_ragas.py`
+### Full pipeline + DeepEval — `run_deepeval.py`
 
-For every example whose `expected_strategy` is `vector_only` or `hybrid`, runs the full dispatcher and feeds the (query, answer, retrieved chunks) triple into Ragas:
+For every example whose `expected_strategy` is `vector_only` or `hybrid`, runs the full dispatcher and feeds the (query, answer, retrieved chunks) triple into DeepEval:
 
-- `Faithfulness` — claims in the answer are grounded in retrieved context
-- `ResponseRelevancy` — the answer addresses the actual question
-- `LLMContextPrecisionWithoutReference` — the retrieved chunks were relevant
+- `FaithfulnessMetric` — claims in the answer are grounded in retrieved context
+- `AnswerRelevancyMetric` — the answer addresses the actual question
+- `ContextualRelevancyMetric` — the retrieved chunks were relevant to the query
 
-`LLMContextRecall` is intentionally **not** included yet — it requires a hand-written reference answer per question, and we only have weak `answer_must_contain` proxies. Adding a `reference_answer` field to the golden set unlocks recall later.
+None of these metrics require a hand-written reference answer — they work with just the `input`, `actual_output`, and `retrieval_context`. Adding `expected_output` later unlocks `ContextualPrecisionMetric` and `ContextualRecallMetric`.
 
 Outputs:
 
-- `src/eval/reports/ragas_<timestamp>.json` — raw scores per row
-- `src/eval/reports/ragas_<timestamp>.html` — self-contained summary report
+- `src/eval/reports/deepeval_<timestamp>.json` — raw scores per row
+- `src/eval/reports/deepeval_<timestamp>.html` — self-contained summary report
 
 ---
 
@@ -591,7 +591,7 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | 3. Chunking + indexing | ✅ | Header-aware chunks, hybrid Qdrant collection, dedup |
 | 4. Retrieval + chat | ✅ | Hybrid search + RRF + FlashRank + grounded answers with `[n]` citations |
 | 5. Adaptive router + SQL | ✅ | Five-strategy router, read-only SQL tool, `[DB]` citations |
-| 6. Eval + tracing + polish | ✅ | Langfuse spans, cost dashboard, routing-accuracy gate, Ragas runner with HTML reports |
+| 6. Eval + tracing + polish | ✅ | Langfuse spans, cost dashboard, routing-accuracy gate, DeepEval runner with HTML reports |
 | 7. Stretch | ⏸️ | C-RAG self-reflection, multi-hop, MCP server, web fallback |
 
 See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance criteria.
@@ -616,9 +616,9 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 | Task queue | `BackgroundTasks` | Celery + Redis | YAGNI; add when measured queue depth justifies it |
 | File watching | Manual upload | watchdog filesystem watcher | UI-driven flow is enough; watcher is feature creep |
 | DB sync to vectors | Live SQL tool, query at runtime | CDC (Debezium et al.) | Core principle: never embed structured data |
-| Eval | Ragas + custom routing-accuracy metric | None / vibes-based | Portfolio projects without metrics look unfinished |
+| Eval | DeepEval + custom routing-accuracy metric | Ragas (async compat issues on Python 3.14), vibes-based | Portfolio projects without metrics look unfinished; DeepEval has no `nest_asyncio` / `sniffio` issues |
 | Tracing | Langfuse | LangSmith, Prometheus + Grafana + Jaeger | LLM-native, model-/framework-agnostic, MIT-licensed core, generous free tier (50k events/month), self-hosting available — sidesteps the LangSmith vendor lock-in concern |
-| Eval reference answers | Skipped for v1 | Hand-written gold answers per row | Ragas Faithfulness / Response Relevancy / Context Precision don't need them; recall does. Add a `reference_answer` field to the golden set when the synthesis prompt is stable enough that recall scores are trustworthy. |
+| Eval reference answers | Skipped for v1 | Hand-written gold answers per row | DeepEval Faithfulness / Answer Relevancy / Contextual Relevancy don't need them; contextual precision and recall do. Add an `expected_output` field to the golden set when the synthesis prompt is stable enough that recall scores are trustworthy. |
 | Cost table source | Langfuse server-side computation | Maintain price table in repo | Model prices change; Langfuse keeps theirs current. We just read totals back via REST. |
 | Tracing default | Disabled (no-op stubs) | Always-on with warnings | Cleaner OSS UX — works without signup; opt-in by setting two env vars |
 

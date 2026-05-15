@@ -251,7 +251,7 @@ queries like "running"/"runs" are affected).
 
 - `src/eval/golden.jsonl` — **minimal smoke set** (≈5 rows, one per strategy) to avoid burning tokens; extend the file anytime you want stronger coverage.
 - `src/eval/run_routing_eval.py` — router-only accuracy + breakdown; **`--threshold` is opt-in** (default: print report only) so tiny goldens don’t spam failures
-- `src/eval/run_ragas.py` — runs the full dispatcher on retrieval-bearing examples and scores them with `Faithfulness`, `ResponseRelevancy`, `LLMContextPrecisionWithoutReference`. Emits both a JSON dump and a self-contained HTML report under `src/eval/reports/`.
+- `src/eval/run_deepeval.py` — runs the full dispatcher on retrieval-bearing examples and scores them with DeepEval's `FaithfulnessMetric`, `AnswerRelevancyMetric`, `ContextualRelevancyMetric`. Emits both a JSON dump and a self-contained HTML report under `src/eval/reports/`.
 - `src/eval/__init__.py` + `src/eval/reports/` (gitignored)
 
 ### UI
@@ -261,8 +261,7 @@ queries like "running"/"runs" are affected).
 ### Dependencies
 
 - `langfuse>=4.0.0`
-- `ragas>=0.2.10`
-- `datasets>=3.0.0` (Ragas dependency, pinned for clarity)
+- `deepeval>=3.0.0`
 
 ### Configuration
 
@@ -271,7 +270,7 @@ queries like "running"/"runs" are affected).
 **Acceptance:**
 
 1. ✅ Routing eval prints per-strategy accuracy and writes `src/eval/reports/routing.json`. Pass `--threshold 0.85` in CI when you want a hard gate.
-2. ✅ Ragas eval emits faithfulness / response relevancy / context precision in both JSON and HTML.
+2. ✅ DeepEval eval emits faithfulness / answer relevancy / contextual relevancy in both JSON and HTML.
 3. ✅ Every chat turn produces a Langfuse trace with router / retrieval / SQL / synthesis spans (when keys are set; otherwise the app behaves identically and the spans are no-ops).
 4. ✅ Admin tab renders cost + token totals (and a friendly setup message when Langfuse is disabled).
 
@@ -314,4 +313,4 @@ Phase 6 is complete. Pick whichever stretch goal is most valuable next: streamin
 | 7. Stretch              | ⏸️     | —    |
 
 
-Last updated: 2026-05-10
+Last updated: 2026-05-15
