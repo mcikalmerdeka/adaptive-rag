@@ -24,6 +24,7 @@ qdrant_storage/
 
 # Eval reports (regenerated; HTML + JSON, can be large)
 src/eval/reports/
+.deepeval/
 
 # Other files
 other/
