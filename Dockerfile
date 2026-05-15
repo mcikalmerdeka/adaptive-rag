@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy dependency definitions first (better Docker layer caching)
 COPY pyproject.toml ./
+COPY README.md ./
 COPY src/ ./src/
 
 # Install dependencies in system Python
