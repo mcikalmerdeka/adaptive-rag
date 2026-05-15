@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from pathlib import Path
 
 from openai import APIConnectionError, APIError, OpenAI, RateLimitError
@@ -182,11 +182,3 @@ class QwenParser:
     @staticmethod
     def is_configured() -> bool:
         return bool(settings.QWEN_API_KEY)
-
-    def warm_up(self) -> None:
-        """Sanity-ping. Does not call the model — just verifies client init."""
-        _ = self._client  # ensure created
-
-    @property
-    def supported_image_suffixes(self) -> Iterable[str]:
-        return ("png", "jpg", "jpeg", "webp")

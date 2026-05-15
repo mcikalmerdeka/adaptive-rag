@@ -51,16 +51,4 @@ class OcrCache:
         except OSError as exc:
             logger.warning(f"Cache write failed for {path.name}: {exc}")
 
-    def has(self, content: bytes) -> bool:
-        return self._path(self.key(content)).exists()
 
-    def clear(self) -> int:
-        """Delete all cached entries. Returns the number of files removed."""
-        count = 0
-        for entry in self.root.glob("*.md"):
-            try:
-                entry.unlink()
-                count += 1
-            except OSError:
-                pass
-        return count

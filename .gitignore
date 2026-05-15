@@ -31,3 +31,6 @@ other/
 error/
 inspiration/
 qwen_test/
+
+# Opencode oh-my-openagent
+.sisyphus/

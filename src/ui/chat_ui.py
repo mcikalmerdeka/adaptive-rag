@@ -207,13 +207,6 @@ def _clear_chat() -> tuple[list[dict], str, str, str]:
     return [], "", _format_idle_sources(), _format_idle_debug()
 
 
-def _backend_status() -> str:
-    sql_state = (
-        "connected" if _get_dispatcher().sql_available else "_disabled (no `SQL_DATABASE_URL`)_"
-    )
-    return f"<sub>SQL backend: {sql_state}</sub>"
-
-
 # ---- tab renderer ---------------------------------------------------------
 
 

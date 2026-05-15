@@ -48,7 +48,4 @@ STRATEGY_LABELS: dict[Strategy, str] = {
 # Strategies that require the SQL backend to be configured.
 SQL_STRATEGIES: frozenset[Strategy] = frozenset({Strategy.SQL_ONLY, Strategy.HYBRID})
 
-# Strategies that touch the vector index.
-VECTOR_STRATEGIES: frozenset[Strategy] = frozenset(
-    {Strategy.VECTOR_ONLY, Strategy.HYBRID}
-)
+

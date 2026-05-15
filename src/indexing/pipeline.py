@@ -50,7 +50,6 @@ class IngestionPipeline:
         self._converter = converter or MarkdownConverterService()
         self._chunker = chunker or MarkdownChunker(chunking_config)
         # Lazy: don't build the Qdrant client unless we actually ingest.
-        self._store_override = store
         self._store: QdrantStore | None = store
 
     @property
