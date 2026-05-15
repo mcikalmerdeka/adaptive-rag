@@ -1,3 +1,14 @@
+---
+title: AdaptiveRAG
+emoji: 🧠
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # AdaptiveRAG
 
 **Hybrid Adaptive RAG with query-time strategy selection, markdown-first ingestion, and an optional MCP tool surface.**

@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.venv
+venv/
+env/
+ENV/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+wheels/
+
+# IDE
+.opencode/
+.cursor/
+.vscode/
+.idea/
+
+# Caches (we copy the built cache from builder stage)
+# .cache/  -- NO, we need this in the build stage
+
+# Local Qdrant storage (ephemeral, not needed in image)
+qdrant_storage/
+
+# Eval reports (regenerated)
+src/eval/reports/
+.deepeval/
+
+# Other project files not needed at runtime
+other/
+error/
+inspiration/
+qwen_test/
+.sisyphus/
+
+# Environment files (secrets should be injected via HF Space settings)
+.env
+.env.example
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# CI/CD (not needed in the image)
+.github/
+
+# Documentation (not needed at runtime, but README.md is needed for HF Spaces card)
+docs/
+
+# OS
+.DS_Store
+Thumbs.db

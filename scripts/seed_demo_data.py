@@ -415,14 +415,20 @@ def main() -> int:
 
     logger.info(
         f"Done. App should connect with: "
-        f"postgresql+psycopg://{RO_ROLE}:{RO_PASSWORD}@localhost:5433/adaptive_rag"
+        f"{_redact(settings.SQL_DATABASE_URL or DEFAULT_ADMIN_URL)}"
     )
     return 0
 
 
 def _ensure_ro_role(conn) -> None:
     logger.info(f"Ensuring read-only role '{RO_ROLE}' exists with SELECT grants")
-    conn.exec_driver_sql(_ro_role_sql())
+    try:
+        conn.exec_driver_sql(_ro_role_sql())
+    except Exception as exc:
+        logger.warning(
+            f"Could not create read-only role (this is expected on managed "
+            f"Postgres like Neon): {exc}"
+        )
 
 
 def _print_summary(conn) -> None:

@@ -1,0 +1,89 @@
+# ---- build stage: install deps + pre-download models -----------------------
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# Install uv for fast Python package management
+RUN pip install --no-cache-dir uv
+
+# Install system dependencies needed for building Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency definitions first (better Docker layer caching)
+COPY pyproject.toml ./
+COPY src/ ./src/
+
+# Install dependencies in system Python
+RUN uv pip install --system -e "."
+
+# Pre-download Docling models and FlashRank model during build
+# This avoids 1-2 minute cold-start penalty on HF Spaces
+ENV HF_HUB_DISABLE_SYMLINKS=1
+ENV HF_HOME=/app/.cache/huggingface
+ENV FLASHRANK_HOME=/app/.cache/flashrank
+RUN python -c "
+import logging
+logging.basicConfig(level=logging.INFO)
+
+# Trigger Docling model download
+print('Pre-downloading Docling models...')
+from src.core.converter import MarkdownConverterService
+MarkdownConverterService()
+print('Docling models cached.')
+
+# Trigger FlashRank model download
+print('Pre-downloading FlashRank model...')
+from src.retrieval.reranker import Reranker
+Reranker()
+print('FlashRank model cached.')
+
+# Trigger FastEmbed BM25 tokenizer download
+print('Pre-downloading FastEmbed BM25 tokenizer...')
+from fastembed.sparse.sparse_embedding import SparseTextEmbedding
+SparseTextEmbedding(model_name='Qdrant/bm25')
+print('FastEmbed tokenizer cached.')
+"
+
+# ---- production stage: lean runtime image ----------------------------------
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install only runtime system deps (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy pre-downloaded model caches
+COPY --from=builder /app/.cache /app/.cache
+
+# Copy application code
+COPY app.py ./
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY ARCHITECTURE.md ./
+COPY PROJECT_PLAN.md ./
+COPY README.md ./
+
+# HF Spaces uses port 7860 by default
+EXPOSE 7860
+
+# Set environment for production
+ENV PYTHONUNBUFFERED=1
+ENV HF_HUB_DISABLE_SYMLINKS=1
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV GRADIO_SERVER_PORT=7860
+
+# Health check for HF Spaces (checks every 30s, 3 retries)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860')" || exit 1
+
+# Run the Gradio app
+CMD ["python", "app.py"]
