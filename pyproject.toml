@@ -26,6 +26,7 @@ dependencies = [
     "qdrant-client>=1.12.0",
     "sqlalchemy>=2.0.36",
     "tenacity>=9.0.0",
+    "pytest>=9.0.3",
 ]
 
 [build-system]
@@ -34,3 +35,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]

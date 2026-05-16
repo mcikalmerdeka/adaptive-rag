@@ -27,6 +27,7 @@ src/eval/reports/
 .deepeval/
 
 # Other files
+assets/
 other/
 error/
 inspiration/
