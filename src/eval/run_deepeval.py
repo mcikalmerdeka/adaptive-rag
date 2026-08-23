@@ -106,6 +106,7 @@ def run_deepeval(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ContextualRelevancyMetric,
         FaithfulnessMetric,
     )
+    from deepeval.models import GPTModel
     from deepeval.test_case import LLMTestCase
 
     test_cases: list[LLMTestCase] = []
@@ -117,11 +118,14 @@ def run_deepeval(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         test_cases.append(tc)
 
-    model = settings.LLM_MODEL
+    # gpt-5.6 models only accept temperature=1. DeepEval's model registry
+    # doesn't know gpt-5.6 yet and would default to temperature=0.0 (a 400
+    # on every judge call), so construct the judge model explicitly.
+    judge = GPTModel(model=settings.LLM_MODEL, temperature=1)
 
-    faithfulness = FaithfulnessMetric(threshold=0.5, model=model)
-    answer_relevancy = AnswerRelevancyMetric(threshold=0.5, model=model)
-    contextual_relevancy = ContextualRelevancyMetric(threshold=0.5, model=model)
+    faithfulness = FaithfulnessMetric(threshold=0.5, model=judge)
+    answer_relevancy = AnswerRelevancyMetric(threshold=0.5, model=judge)
+    contextual_relevancy = ContextualRelevancyMetric(threshold=0.5, model=judge)
 
     metrics = [faithfulness, answer_relevancy, contextual_relevancy]
 

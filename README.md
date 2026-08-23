@@ -97,9 +97,9 @@ See:
   - `RERANK_TOP_K=5` (final chunks shown to the LLM, default `5`)
   - `RETRIEVAL_PREFETCH_K=25` (candidates fetched before reranking)
   - `RERANKER_MODEL` (swap to `ms-marco-TinyBERT-L-2-v2` for speed or `rank-T5-flan` for quality)
-  - `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS` (synthesis)
-  - `ROUTER_MODEL`, `ROUTER_TEMPERATURE` (classifier)
-  - `SQL_MODEL` (NL→SQL translator)
+  - `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_REASONING_MODE` (synthesis — default `gpt-5.6-luna` in pro reasoning mode)
+  - `ROUTER_MODEL`, `ROUTER_TEMPERATURE` (classifier — default `gpt-4.1-nano`)
+  - `SQL_MODEL`, `SQL_REASONING_MODE` (NL→SQL translator — default `gpt-5.6-luna` in pro reasoning mode)
   - `SQL_DATABASE_URL`, `SQL_QUERY_TIMEOUT_SEC`, `SQL_ROW_LIMIT` (Phase 5)
   - `DENSE_MODEL`, `SPARSE_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, etc.
 
@@ -214,8 +214,9 @@ Open `http://localhost:7860`.
 | `SQL_DATABASE_URL` (optional) | SQLAlchemy URL for the SQL tool. Leave unset to disable `sql_only` / `hybrid` strategies. | — |
 | `SQL_QUERY_TIMEOUT_SEC` (optional, default `5`) | Per-query Postgres `statement_timeout` | — |
 | `SQL_ROW_LIMIT` (optional, default `200`) | Implicit `LIMIT N` injected when the SQL doesn't have one | — |
+| `LLM_MODEL` (optional, default `gpt-5.6-luna`) | Synthesis LLM; `LLM_REASONING_MODE=pro` gives "GPT-5.6 Luna Pro" behaviour | — |
 | `ROUTER_MODEL` (optional, default `gpt-4.1-nano`) | Router classifier model | — |
-| `SQL_MODEL` (optional, default `gpt-4.1-mini`) | NL→SQL translator model | — |
+| `SQL_MODEL` (optional, default `gpt-5.6-luna`) | NL→SQL translator model (`SQL_REASONING_MODE=pro` by default) | — |
 | `LANGFUSE_PUBLIC_KEY` (optional) | Langfuse tracing — set both to enable. App is a no-op tracer when missing. | https://cloud.langfuse.com/ |
 | `LANGFUSE_SECRET_KEY` (optional) | Same as above | — |
 | `LANGFUSE_HOST` (optional, default `https://cloud.langfuse.com`) | Set to `https://us.cloud.langfuse.com` for the US region or your self-hosted URL | — |

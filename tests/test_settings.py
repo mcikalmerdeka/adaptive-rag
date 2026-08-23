@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -82,12 +83,14 @@ class TestSettings:
             RETRIEVAL_PREFETCH_K=25,
             RERANK_TOP_K=5,
             RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-            LLM_MODEL="gpt-4.1-mini",
+            LLM_MODEL="gpt-5.6-luna",
             LLM_TEMPERATURE=0.2,
-            LLM_MAX_TOKENS=1024,
+            LLM_MAX_TOKENS=4096,
+            LLM_REASONING_MODE="pro",
             ROUTER_MODEL="gpt-4.1-nano",
             ROUTER_TEMPERATURE=0.0,
-            SQL_MODEL="gpt-4.1-mini",
+            SQL_MODEL="gpt-5.6-luna",
+            SQL_REASONING_MODE="pro",
             SQL_DATABASE_URL=None,
             SQL_QUERY_TIMEOUT_SEC=5,
             SQL_ROW_LIMIT=200,
@@ -116,12 +119,14 @@ class TestSettings:
             RETRIEVAL_PREFETCH_K=25,
             RERANK_TOP_K=5,
             RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-            LLM_MODEL="gpt-4.1-mini",
+            LLM_MODEL="gpt-5.6-luna",
             LLM_TEMPERATURE=0.2,
-            LLM_MAX_TOKENS=1024,
+            LLM_MAX_TOKENS=4096,
+            LLM_REASONING_MODE="pro",
             ROUTER_MODEL="gpt-4.1-nano",
             ROUTER_TEMPERATURE=0.0,
-            SQL_MODEL="gpt-4.1-mini",
+            SQL_MODEL="gpt-5.6-luna",
+            SQL_REASONING_MODE="pro",
             SQL_DATABASE_URL=None,
             SQL_QUERY_TIMEOUT_SEC=5,
             SQL_ROW_LIMIT=200,
@@ -148,12 +153,14 @@ class TestSettings:
             RETRIEVAL_PREFETCH_K=25,
             RERANK_TOP_K=5,
             RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-            LLM_MODEL="gpt-4.1-mini",
+            LLM_MODEL="gpt-5.6-luna",
             LLM_TEMPERATURE=0.2,
-            LLM_MAX_TOKENS=1024,
+            LLM_MAX_TOKENS=4096,
+            LLM_REASONING_MODE="pro",
             ROUTER_MODEL="gpt-4.1-nano",
             ROUTER_TEMPERATURE=0.0,
-            SQL_MODEL="gpt-4.1-mini",
+            SQL_MODEL="gpt-5.6-luna",
+            SQL_REASONING_MODE="pro",
             SQL_DATABASE_URL=None,
             SQL_QUERY_TIMEOUT_SEC=5,
             SQL_ROW_LIMIT=200,
@@ -164,3 +171,64 @@ class TestSettings:
         )
         with pytest.raises(AttributeError):
             s.CHUNK_SIZE = 999  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Reasoning-mode properties (gpt-5.6 family)
+# ---------------------------------------------------------------------------
+
+
+def _settings_with(**overrides: Any) -> Settings:
+    """Build a Settings instance from the documented defaults."""
+    values: dict[str, Any] = dict(
+        OPENAI_API_KEY=None,
+        QWEN_API_KEY=None,
+        QDRANT_URL=None,
+        QDRANT_API_KEY=None,
+        QDRANT_PATH="./qdrant_storage",
+        QDRANT_COLLECTION="adaptive_rag",
+        DENSE_MODEL="text-embedding-3-small",
+        DENSE_SIZE=1536,
+        SPARSE_MODEL="Qdrant/bm25",
+        CHUNK_SIZE=1500,
+        CHUNK_OVERLAP=200,
+        RETRIEVAL_PREFETCH_K=25,
+        RERANK_TOP_K=5,
+        RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
+        LLM_MODEL="gpt-5.6-luna",
+        LLM_TEMPERATURE=0.2,
+        LLM_MAX_TOKENS=4096,
+        LLM_REASONING_MODE="pro",
+        ROUTER_MODEL="gpt-4.1-nano",
+        ROUTER_TEMPERATURE=0.0,
+        SQL_MODEL="gpt-5.6-luna",
+        SQL_REASONING_MODE="pro",
+        SQL_DATABASE_URL=None,
+        SQL_QUERY_TIMEOUT_SEC=5,
+        SQL_ROW_LIMIT=200,
+        LANGFUSE_PUBLIC_KEY=None,
+        LANGFUSE_SECRET_KEY=None,
+        LANGFUSE_HOST="https://cloud.langfuse.com",
+        CACHE_DIR=Path("./.cache"),
+    )
+    values.update(overrides)
+    return Settings(**values)
+
+
+class TestReasoningMode:
+    """llm_reasoning / sql_reasoning property behavior (gpt-5.6 pro mode)."""
+
+    def test_pro_mode_is_the_default(self) -> None:
+        s = _settings_with()
+        assert s.llm_reasoning == {"mode": "pro"}
+        assert s.sql_reasoning == {"mode": "pro"}
+
+    def test_off_omits_the_reasoning_parameter(self) -> None:
+        s = _settings_with(LLM_REASONING_MODE="off", SQL_REASONING_MODE="off")
+        assert s.llm_reasoning is None
+        assert s.sql_reasoning is None
+
+    def test_standard_mode_passes_through(self) -> None:
+        s = _settings_with(SQL_REASONING_MODE="standard")
+        assert s.llm_reasoning == {"mode": "pro"}
+        assert s.sql_reasoning == {"mode": "standard"}

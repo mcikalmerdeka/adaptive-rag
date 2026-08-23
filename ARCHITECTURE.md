@@ -407,7 +407,7 @@ Plus `SET TRANSACTION READ ONLY` on every connection — belt + suspenders + bun
 
 ### NL → SQL
 
-A second LLM call (`gpt-4.1-mini` by default, `SQL_MODEL`) translates the router's `sql_intent` into a single `SELECT`. Schema is included in the prompt — generated once via SQLAlchemy `inspect()` at startup, formatted as DDL-style table descriptions with column types, primary keys, and foreign keys.
+A second LLM call (`gpt-5.6-luna` by default, `SQL_MODEL`) translates the router's `sql_intent` into a single `SELECT`. Schema is included in the prompt — generated once via SQLAlchemy `inspect()` at startup, formatted as DDL-style table descriptions with column types, primary keys, and foreign keys.
 
 Structured output forces a `_SqlOutput { sql: str }` schema, so the LLM can't dump prose around the query.
 
@@ -479,7 +479,7 @@ Three caches on disk, all SHA256-keyed:
 
 Default location is `./.cache/`, override with `CACHE_DIR`.
 
-Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-4.1-mini`). Routing (`gpt-4.1-nano`) is roughly 1/10th the cost; SQL translation is one extra mini-call only when needed. The live numbers are tracked by Langfuse — see the next section.
+Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-5.6-luna` in pro reasoning mode). Routing (`gpt-4.1-nano`) stays the cheapest stage; SQL translation is one extra call only when needed. The live numbers are tracked by Langfuse — see the next section.
 
 ---
 
@@ -567,10 +567,13 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | `RETRIEVAL_PREFETCH_K` | `25` | Candidates fetched before rerank |
 | `RERANK_TOP_K` | `5` | Final chunks shown to the LLM |
 | `RERANKER_MODEL` | `ms-marco-MiniLM-L-12-v2` | FlashRank model |
-| `LLM_MODEL` | `gpt-4.1-mini` | Synthesis |
-| `LLM_TEMPERATURE` | `0.2` | |
+| `LLM_MODEL` | `gpt-5.6-luna` | Synthesis ("Luna Pro" = pro reasoning mode) |
+| `LLM_TEMPERATURE` | `0.2` | Ignored by gpt-5.6 (only `1` supported) |
+| `LLM_MAX_TOKENS` | `4096` | Output budget incl. pro-mode reasoning tokens |
+| `LLM_REASONING_MODE` | `pro` | `pro` / `standard` / `off` (gpt-5.6 family only) |
 | `ROUTER_MODEL` | `gpt-4.1-nano` | Cheap classifier |
-| `SQL_MODEL` | `gpt-4.1-mini` | NL→SQL translator |
+| `SQL_MODEL` | `gpt-5.6-luna` | NL→SQL translator |
+| `SQL_REASONING_MODE` | `pro` | Same semantics as `LLM_REASONING_MODE` |
 | `SQL_DATABASE_URL` | (unset) | Leave unset to disable `sql_only` / `hybrid` strategies |
 | `SQL_QUERY_TIMEOUT_SEC` | `5` | Per-query Postgres timeout |
 | `SQL_ROW_LIMIT` | `200` | Implicit `LIMIT N` injection |
@@ -609,7 +612,7 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 | Sparse encoder | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
 | Reranker | FlashRank `ms-marco-MiniLM-L-12-v2` | BGE-reranker-v2-m3 (Torch), Cohere Rerank (paid), ColBERT | Pure ONNX via `onnxruntime` (already pulled by `fastembed`); no Torch / Transformers; sidesteps Python-3.14 native-extension instability we hit with `py-rust-stemmers` |
 | Router LLM | `gpt-4.1-nano` | `gpt-4.1-mini`, `claude-haiku` | Cheapest model that classifies reliably; classification doesn't need frontier reasoning |
-| Synthesis LLM | `gpt-4.1-mini` | `gpt-4.1`, `gpt-4o-mini` | Strong enough to follow citation rules, cheap enough for hot path |
+| Synthesis LLM | `gpt-5.6-luna` + `reasoning.mode=pro` | `gpt-4.1-mini`, `gpt-5.6-terra` | Strong enough to follow citation rules, cheap enough for hot path; pro mode trades latency for answer quality |
 | Tool protocol | Native Python class with explicit dispatch | OpenAI function calling registry, MCP for everything | We're not an agent loop — the router *picks* a strategy, then we run it. Registry abstraction is dead weight. MCP only when external clients consume. |
 | SQL backend | Postgres in Docker bound to host port 5433 | Default 5432, SQLite, Neon | 5433 sidesteps collisions with host-installed Postgres on 5432; users can swap to Neon by changing `SQL_DATABASE_URL` |
 | Read-only enforcement | Dedicated DB role + statement allowlist + keyword regex + statement_timeout + LIMIT injection + READ ONLY transaction | Just one of those | Defense in depth — any one layer might be misconfigured |

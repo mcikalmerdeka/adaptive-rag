@@ -130,6 +130,9 @@ class GroundedAnswerer:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            # gpt-5.6 family: {"mode": "pro"} = Luna Pro behaviour. None keeps
+            # the Chat Completions path for non-reasoning models.
+            reasoning=settings.llm_reasoning,
         )
 
     # ---- public API ---------------------------------------------------

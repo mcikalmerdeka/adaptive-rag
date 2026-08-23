@@ -159,7 +159,7 @@ queries like "running"/"runs" are affected).
 ### Dependencies
 
 - Added `flashrank>=0.2.9` (pure-ONNX reranker, no Torch — keeps Python 3.14 install clean)
-- LLM via existing `langchain-openai` (`ChatOpenAI`, model defaults to `gpt-4.1-mini`)
+- LLM via existing `langchain-openai` (`ChatOpenAI`, model defaults to `gpt-5.6-luna`)
 
 ### UI
 
@@ -205,7 +205,7 @@ queries like "running"/"runs" are affected).
 ### Infrastructure
 
 - Postgres added to `docker-compose.yml` (`postgres:17-alpine`, healthcheck, persistent volume). **Bound to host port `5433`** (not `5432`) to dodge collisions with a host-installed Postgres.
-- `.env.example` documents `SQL_DATABASE_URL`, `SQL_QUERY_TIMEOUT_SEC`, `SQL_ROW_LIMIT`, `ROUTER_MODEL`, `ROUTER_TEMPERATURE`, `SQL_MODEL`. All wired through `src.config.settings`.
+- `.env.example` documents `SQL_DATABASE_URL`, `SQL_QUERY_TIMEOUT_SEC`, `SQL_ROW_LIMIT`, `ROUTER_MODEL`, `ROUTER_TEMPERATURE`, `SQL_MODEL`, `SQL_REASONING_MODE`. All wired through `src.config.settings`.
 
 ### Dependencies
 

@@ -149,8 +149,13 @@ class SqlTool:
 
         self._llm = ChatOpenAI(
             model=translator_model or settings.SQL_MODEL,
+            # Ignored by gpt-5.6 reasoning models (only temperature=1 is
+            # supported); langchain-openai strips it automatically.
             temperature=0.0,
-            max_tokens=400,
+            # Pro-mode reasoning tokens count toward this budget — 400 was
+            # enough for gpt-4.1-mini but truncates Luna Pro mid-reasoning.
+            max_tokens=8000,
+            reasoning=settings.sql_reasoning,
         ).with_structured_output(_SqlOutput)
 
         logger.info(

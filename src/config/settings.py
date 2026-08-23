@@ -79,11 +79,16 @@ class Settings:
     LLM_MODEL: str
     LLM_TEMPERATURE: float
     LLM_MAX_TOKENS: int
+    # gpt-5.6 reasoning mode: "pro" | "standard" | "off" (off = omit the
+    # reasoning parameter, for models outside the gpt-5.6 family).
+    LLM_REASONING_MODE: str | None
 
     # ---- Adaptive router (Phase 5) ----
     ROUTER_MODEL: str
     ROUTER_TEMPERATURE: float
     SQL_MODEL: str
+    # Same semantics as LLM_REASONING_MODE, for the NL->SQL translator.
+    SQL_REASONING_MODE: str | None
 
     # ---- SQL tool (Phase 5) ----
     SQL_DATABASE_URL: str | None
@@ -103,6 +108,25 @@ class Settings:
         """True when both Langfuse keys are present."""
         return bool(self.LANGFUSE_PUBLIC_KEY and self.LANGFUSE_SECRET_KEY)
 
+    @property
+    def llm_reasoning(self) -> dict[str, str] | None:
+        """Responses API ``reasoning`` payload for the synthesis LLM.
+
+        ``None`` omits the parameter entirely — set ``LLM_REASONING_MODE=off``
+        when swapping ``LLM_MODEL`` to a model outside the gpt-5.6 family,
+        which rejects the parameter with a 400.
+        """
+        if self.LLM_REASONING_MODE in (None, "", "off"):
+            return None
+        return {"mode": self.LLM_REASONING_MODE}
+
+    @property
+    def sql_reasoning(self) -> dict[str, str] | None:
+        """Same as :attr:`llm_reasoning`, for the NL→SQL translator."""
+        if self.SQL_REASONING_MODE in (None, "", "off"):
+            return None
+        return {"mode": self.SQL_REASONING_MODE}
+
 
 def _load() -> Settings:
     return Settings(
@@ -120,12 +144,18 @@ def _load() -> Settings:
         RETRIEVAL_PREFETCH_K=_env_int("RETRIEVAL_PREFETCH_K", 25),
         RERANK_TOP_K=_env_int("RERANK_TOP_K", 5),
         RERANKER_MODEL=_env_str("RERANKER_MODEL", "ms-marco-MiniLM-L-12-v2"),
-        LLM_MODEL=_env_str("LLM_MODEL", "gpt-4.1-mini"),
+        LLM_MODEL=_env_str("LLM_MODEL", "gpt-5.6-luna"),
+        # NOTE: gpt-5.6 models only support temperature=1; langchain-openai
+        # strips non-default temperatures automatically. Kept for fallback models.
         LLM_TEMPERATURE=_env_float("LLM_TEMPERATURE", 0.2),
-        LLM_MAX_TOKENS=_env_int("LLM_MAX_TOKENS", 1024),
+        # Pro-mode reasoning tokens count toward the output budget — 1024
+        # truncated grounded answers, so leave headroom.
+        LLM_MAX_TOKENS=_env_int("LLM_MAX_TOKENS", 4096),
+        LLM_REASONING_MODE=_env_str("LLM_REASONING_MODE", "pro"),
         ROUTER_MODEL=_env_str("ROUTER_MODEL", "gpt-4.1-nano"),
         ROUTER_TEMPERATURE=_env_float("ROUTER_TEMPERATURE", 0.0),
-        SQL_MODEL=_env_str("SQL_MODEL", "gpt-4.1-mini"),
+        SQL_MODEL=_env_str("SQL_MODEL", "gpt-5.6-luna"),
+        SQL_REASONING_MODE=_env_str("SQL_REASONING_MODE", "pro"),
         SQL_DATABASE_URL=_env_optional("SQL_DATABASE_URL"),
         SQL_QUERY_TIMEOUT_SEC=_env_int("SQL_QUERY_TIMEOUT_SEC", 5),
         SQL_ROW_LIMIT=_env_int("SQL_ROW_LIMIT", 200),
