@@ -25,8 +25,6 @@ from src.config import settings
 from src.utils import iter_pdf_page_pngs
 
 logger = logging.getLogger(__name__)
-
-
 # Deterministic prompt: explicit, no creativity, no commentary.
 OCR_PROMPT = (
     "Extract all text from this image into clean GitHub-Flavored Markdown.\n"
@@ -39,9 +37,6 @@ OCR_PROMPT = (
     "- If a region is illegible, write [illegible] in its place.\n"
     "- Output the markdown only. No preamble, no explanation."
 )
-
-DEFAULT_MODEL = "qwen3-vl-plus"
-DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 _RETRYABLE = (RateLimitError, APIConnectionError, APIError)
 
@@ -56,8 +51,8 @@ class QwenParser:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = DEFAULT_MODEL,
-        base_url: str = DEFAULT_BASE_URL,
+        model: str | None = None,
+        base_url: str | None = None,
         cache: OcrCache | None = None,
     ) -> None:
         api_key = api_key or settings.QWEN_API_KEY
@@ -66,8 +61,11 @@ class QwenParser:
                 "QWEN_API_KEY is not set. Add it to .env or pass api_key=..."
             )
 
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
-        self._model = model
+        self._client = OpenAI(
+            api_key=api_key,
+            base_url=base_url or settings.QWEN_BASE_URL,
+        )
+        self._model = model or settings.QWEN_MODEL
         self._cache = cache or OcrCache(settings.CACHE_DIR / "ocr")
 
     # ---- public API -----------------------------------------------------

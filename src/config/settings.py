@@ -52,6 +52,10 @@ class Settings:
     # ---- API keys ----
     OPENAI_API_KEY: str | None
     QWEN_API_KEY: str | None
+    # Qwen OCR (DashScope). The base URL must match the region the API key
+    # belongs to — Singapore workspace keys use the ap-southeast-1 host.
+    QWEN_MODEL: str
+    QWEN_BASE_URL: str
 
     # ---- Qdrant ----
     QDRANT_URL: str | None
@@ -132,6 +136,14 @@ def _load() -> Settings:
     return Settings(
         OPENAI_API_KEY=_env_optional("OPENAI_API_KEY"),
         QWEN_API_KEY=_env_optional("QWEN_API_KEY"),
+        # Default is the shared Singapore (international) domain; set
+        # QWEN_BASE_URL to your workspace-specific ap-southeast-1 host for
+        # production (dedicated capacity + traffic isolation).
+        QWEN_MODEL=_env_str("QWEN_MODEL", "qwen3-vl-plus"),
+        QWEN_BASE_URL=_env_str(
+            "QWEN_BASE_URL",
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        ),
         QDRANT_URL=_env_optional("QDRANT_URL"),
         QDRANT_API_KEY=_env_optional("QDRANT_API_KEY"),
         QDRANT_PATH=_env_str("QDRANT_PATH", "./qdrant_storage"),

@@ -71,6 +71,8 @@ class TestSettings:
         s = Settings(
             OPENAI_API_KEY=None,
             QWEN_API_KEY=None,
+            QWEN_MODEL="qwen3-vl-plus",
+            QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             QDRANT_URL=None,
             QDRANT_API_KEY=None,
             QDRANT_PATH="./qdrant_storage",
@@ -102,11 +104,17 @@ class TestSettings:
         assert s.CHUNK_SIZE == 1500
         assert s.RERANK_TOP_K == 5
         assert s.langfuse_enabled is False
+        assert s.QWEN_MODEL == "qwen3-vl-plus"
+        assert s.QWEN_BASE_URL == (
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        )
 
     def test_langfuse_enabled_when_keys_present(self) -> None:
         s = Settings(
             OPENAI_API_KEY="sk-test",
             QWEN_API_KEY=None,
+            QWEN_MODEL="qwen3-vl-plus",
+            QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             QDRANT_URL=None,
             QDRANT_API_KEY=None,
             QDRANT_PATH="./qdrant_storage",
@@ -141,6 +149,8 @@ class TestSettings:
         s = Settings(
             OPENAI_API_KEY=None,
             QWEN_API_KEY=None,
+            QWEN_MODEL="qwen3-vl-plus",
+            QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
             QDRANT_URL=None,
             QDRANT_API_KEY=None,
             QDRANT_PATH="./qdrant_storage",
@@ -183,6 +193,8 @@ def _settings_with(**overrides: Any) -> Settings:
     values: dict[str, Any] = dict(
         OPENAI_API_KEY=None,
         QWEN_API_KEY=None,
+        QWEN_MODEL="qwen3-vl-plus",
+        QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         QDRANT_URL=None,
         QDRANT_API_KEY=None,
         QDRANT_PATH="./qdrant_storage",

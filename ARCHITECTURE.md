@@ -558,6 +558,8 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 |---|---|---|
 | `OPENAI_API_KEY` | (required) | Embeddings, router, SQL gen, synthesis |
 | `QWEN_API_KEY` | (required for OCR) | DashScope endpoint |
+| `QWEN_MODEL` | `qwen3-vl-plus` | Vision model for OCR |
+| `QWEN_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | Shared Singapore domain; set to the workspace-specific `ap-southeast-1` host for production |
 | `QDRANT_URL` | `http://localhost:6333` (or unset → embedded mode) | Vector DB |
 | `QDRANT_COLLECTION` | `adaptive_rag` | Collection name |
 | `DENSE_MODEL` | `text-embedding-3-small` | Must match `DENSE_SIZE` |

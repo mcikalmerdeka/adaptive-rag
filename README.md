@@ -207,6 +207,8 @@ Open `http://localhost:7860`.
 |---|---|---|
 | `OPENAI_API_KEY` | Dense embeddings + chat LLM + router + NL→SQL | https://platform.openai.com/ |
 | `QWEN_API_KEY` | Image + scanned PDF OCR via Qwen3-VL | https://dashscope.aliyun.com/ |
+| `QWEN_BASE_URL` (optional, default shared Singapore domain `dashscope-intl.aliyuncs.com/compatible-mode/v1`) | DashScope endpoint — set to your workspace-specific `ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` host for production (must match the region your key belongs to) | — |
+| `QWEN_MODEL` (optional, default `qwen3-vl-plus`) | Vision model used for OCR | — |
 | `QDRANT_URL` (optional) | Connect to a remote Qdrant. Leave unset for embedded mode. | — |
 | `QDRANT_API_KEY` (optional) | Qdrant Cloud auth | https://cloud.qdrant.io/ |
 | `QDRANT_PATH` (optional) | Override the embedded storage directory | — |
