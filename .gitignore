@@ -33,5 +33,5 @@ error/
 inspiration/
 qwen_test/
 
-# Opencode oh-my-openagent
-.sisyphus/
+# AXIOM
+.agents/skills/developing-with-streamlit/
