@@ -13,7 +13,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.core import DocumentConverterError, MarkdownConverterService
-from src.core.qwen_parser import QwenParser
+from src.core.glm_parser import GLMParser
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def _format_file_info(file_info) -> str:
 
 def _convert_document(
     file_info,
-    force_qwen_for_pdf: bool,
+    force_vlm_for_pdf: bool,
     progress: gr.Progress = gr.Progress(),
 ) -> tuple[str, str, gr.DownloadButton]:
     file_path = _resolve_path(file_info)
@@ -102,7 +102,7 @@ def _convert_document(
 
         output = service.convert_detailed(
             file_path,
-            force_qwen_for_pdf=force_qwen_for_pdf,
+            force_vlm_for_pdf=force_vlm_for_pdf,
             progress=_on_page,
         )
 
@@ -161,12 +161,13 @@ def _clear_all():
 
 def render_convert_tab() -> None:
     """Build the Convert tab. Call inside ``with gr.Tab(...):``."""
-    qwen_available = QwenParser.is_configured()
-    qwen_note = (
-        "Qwen3-VL is configured. Images and scanned PDFs will use it automatically."
-        if qwen_available
-        else "QWEN_API_KEY not set. Image and scanned-PDF OCR will fail. "
-        "Add it to .env to enable."
+    vlm_available = GLMParser.is_configured()
+    vlm_note = (
+        "GLM-5.3-Flash is configured. Images, scanned PDFs, and videos "
+        "(.mp4/.mkv/.mov) will use it automatically."
+        if vlm_available
+        else "ZAI_API_KEY not set. Image, scanned-PDF, and video analysis "
+        "will fail. Add it to .env to enable."
     )
 
     gr.Markdown(
@@ -176,7 +177,7 @@ def render_convert_tab() -> None:
         The router picks the best parser per file:
 
         - **Docling** for `.pdf` (born-digital), `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv`
-        - **Qwen3-VL** for images and scanned PDFs
+        - **GLM-5.3-Flash** for images, scanned PDFs, and videos
         - **Passthrough** for `.md` and `.txt`
         """
     )
@@ -195,15 +196,15 @@ def render_convert_tab() -> None:
                 value="Upload a document to get started."
             )
 
-            force_qwen = gr.Checkbox(
-                label="Force Qwen3-VL OCR for PDFs",
+            force_vlm = gr.Checkbox(
+                label="Force GLM OCR for PDFs",
                 value=False,
                 info=(
                     "Override the born-digital heuristic. Use when "
                     "Docling's output is poor on complex layouts. "
-                    "Will incur Qwen API costs."
+                    "Will incur Z.ai API costs."
                 ),
-                interactive=qwen_available,
+                interactive=vlm_available,
             )
 
             with gr.Row():
@@ -230,7 +231,7 @@ def render_convert_tab() -> None:
             with gr.Accordion("Supported formats", open=False):
                 gr.Markdown(_get_service().detector.supported_formats_text)
 
-            gr.Markdown(f"_{qwen_note}_")
+            gr.Markdown(f"_{vlm_note}_")
 
         with gr.Column(scale=2):
             gr.Markdown("#### Markdown preview")
@@ -252,7 +253,7 @@ def render_convert_tab() -> None:
 
     convert_btn.click(
         fn=_convert_document,
-        inputs=[file_input, force_qwen],
+        inputs=[file_input, force_vlm],
         outputs=[markdown_preview, status_display, download_btn],
     )
 

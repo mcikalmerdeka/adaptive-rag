@@ -22,8 +22,8 @@ def build_app() -> gr.Blocks:
             **Hybrid Adaptive RAG** with markdown-first ingestion, hybrid
             search + cross-encoder reranking, query-time adaptive routing
             (vector / SQL / hybrid / clarify), and Langfuse tracing. Convert
-            documents, ingest them into Qdrant, then chat with grounded
-            citations.
+            documents and videos, ingest them into Qdrant, then chat with
+            grounded citations.
             """
         )
 
@@ -41,7 +41,7 @@ def build_app() -> gr.Blocks:
             """
             ---
             Powered by [Docling](https://github.com/docling-project/docling),
-            [Qwen3-VL](https://help.aliyun.com/zh/dashscope/),
+            [GLM-5.3-Flash](https://docs.z.ai/guides/vlm/glm-5.3-flash),
             [Qdrant](https://qdrant.tech/) and
             [LangChain](https://python.langchain.com/) ·
             Built with [Gradio](https://gradio.app)
