@@ -15,8 +15,8 @@ from pathlib import Path
 
 from .docling_parser import DoclingParserError
 from .file_detector import FileTypeDetector, FileTypeInfo
+from .glm_parser import GLMParserError
 from .parser_router import ParserRouter, ParseResult
-from .qwen_parser import QwenParserError
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +63,19 @@ class MarkdownConverterService:
     def convert(
         self,
         file_path: str | Path,
-        force_qwen_for_pdf: bool = False,
+        force_vlm_for_pdf: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> str:
         return self.convert_detailed(
             file_path,
-            force_qwen_for_pdf=force_qwen_for_pdf,
+            force_vlm_for_pdf=force_vlm_for_pdf,
             progress=progress,
         ).markdown
 
     def convert_detailed(
         self,
         file_path: str | Path,
-        force_qwen_for_pdf: bool = False,
+        force_vlm_for_pdf: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> ConversionOutput:
         info = self._detector.validate(file_path)
@@ -86,10 +86,10 @@ class MarkdownConverterService:
         try:
             result: ParseResult = self._router.parse(
                 info,
-                force_qwen_for_pdf=force_qwen_for_pdf,
+                force_vlm_for_pdf=force_vlm_for_pdf,
                 progress=progress,
             )
-        except (DoclingParserError, QwenParserError) as exc:
+        except (DoclingParserError, GLMParserError) as exc:
             raise DocumentConverterError(str(exc)) from exc
         except (ValueError, FileNotFoundError):
             raise
@@ -113,9 +113,9 @@ class MarkdownConverterService:
         self,
         file_path: str | Path,
         output_path: str | Path | None = None,
-        force_qwen_for_pdf: bool = False,
+        force_vlm_for_pdf: bool = False,
     ) -> Path:
-        markdown = self.convert(file_path, force_qwen_for_pdf=force_qwen_for_pdf)
+        markdown = self.convert(file_path, force_vlm_for_pdf=force_vlm_for_pdf)
         if output_path is None:
             stem = Path(file_path).stem
             output_path = Path(tempfile.gettempdir()) / f"{stem}.md"
