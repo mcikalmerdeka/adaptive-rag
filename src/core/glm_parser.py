@@ -16,6 +16,8 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import mimetypes
+from collections.abc import Callable
 from pathlib import Path
 
 from openai import APIConnectionError, APIError, OpenAI, RateLimitError
@@ -29,6 +31,7 @@ from tenacity import (
 
 from src.cache import OcrCache
 from src.config import settings
+from src.utils import iter_pdf_page_pngs
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +117,47 @@ class GLMParser:
         data, mime = self._prepare_image(path.read_bytes(), suffix)
         return self._extract_from_bytes(data, mime, label=path.name)
 
+    def extract_pdf_pages(
+        self,
+        file_path: str | Path,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> str:
+        """Render each page to PNG and OCR via GLM. Concatenate results.
+
+        ``progress(current, total)`` is invoked after each page completes
+        (cached or freshly extracted). Useful for UI feedback.
+        """
+        path = Path(file_path)
+        pages = list(iter_pdf_page_pngs(path))
+        total = len(pages)
+        if total == 0:
+            return ""
+
+        rendered: list[str] = []
+        for i, png_bytes in pages:
+            label = f"{path.name} page {i}/{total}"
+            md = self._extract_from_bytes(png_bytes, mime_suffix="png", label=label)
+            rendered.append(self._format_page_block(i, md))
+            if progress is not None:
+                progress(i, total)
+
+        return "\n\n".join(rendered).strip()
+
+    def extract_video(self, file_path: str | Path) -> str:
+        """Analyze a whole video file and return its markdown record."""
+        path = Path(file_path)
+        raw = path.read_bytes()
+        limit = settings.GLM_VIDEO_MAX_UPLOAD_MB * 1024 * 1024
+        if len(raw) > limit:
+            raise GLMParserError(
+                f"Video is {len(raw) / (1024 * 1024):.0f} MB, exceeding "
+                f"GLM_VIDEO_MAX_UPLOAD_MB={settings.GLM_VIDEO_MAX_UPLOAD_MB}. "
+                "Raise the limit in .env, trim the clip, or host it at a public URL."
+            )
+        return self._extract_from_bytes(
+            raw, mime_suffix=self._video_mime(path), label=path.name
+        )
+
     # ---- internals -------------------------------------------------------
 
     def _extract_from_bytes(
@@ -140,11 +184,18 @@ class GLMParser:
     )
     def _call_glm(self, content: bytes, mime_suffix: str) -> str:
         b64 = base64.b64encode(content).decode("ascii")
-        data_url = f"data:image/{mime_suffix};base64,{b64}"
-        blocks = [
-            {"type": "image_url", "image_url": {"url": data_url}},
-            {"type": "text", "text": OCR_PROMPT},
-        ]
+        if mime_suffix.startswith("video/"):
+            data_url = f"data:{mime_suffix};base64,{b64}"
+            blocks = [
+                {"type": "video_url", "video_url": {"url": data_url}},
+                {"type": "text", "text": VIDEO_PROMPT},
+            ]
+        else:
+            data_url = f"data:image/{mime_suffix};base64,{b64}"
+            blocks = [
+                {"type": "image_url", "image_url": {"url": data_url}},
+                {"type": "text", "text": OCR_PROMPT},
+            ]
 
         try:
             completion = self._client.chat.completions.create(
@@ -159,10 +210,24 @@ class GLMParser:
         except _RETRYABLE:
             raise
         except Exception as exc:
-            raise GLMParserError(f"GLM request failed: {exc}") from exc
+            message = f"GLM request failed: {exc}"
+            if mime_suffix.startswith("video/"):
+                # Base64 video delivery is undocumented at Z.ai (official
+                # mode is a public URL) — give the user the honest out.
+                message += (
+                    " Note: Z.ai officially documents video via public URL; "
+                    "if base64 video uploads are rejected, host the file at "
+                    "a public URL."
+                )
+            raise GLMParserError(message) from exc
 
         text = (completion.choices[0].message.content or "").strip()
         return self._strip_outer_fence(text)
+
+    @staticmethod
+    def _video_mime(path: Path) -> str:
+        """Full MIME type for the video container; mp4 as safe default."""
+        return mimetypes.guess_type(str(path))[0] or "video/mp4"
 
     def _prepare_image(self, raw: bytes, mime_suffix: str) -> tuple[bytes, str]:
         """Return ``(bytes_to_send, mime_suffix)`` within Z.ai's image limits.
@@ -221,6 +286,12 @@ class GLMParser:
         if first in {"```", "```markdown", "```md"}:
             return "\n".join(lines[1:-1]).strip()
         return text
+
+    @staticmethod
+    def _format_page_block(page_number: int, markdown: str) -> str:
+        if not markdown:
+            return f"<!-- page {page_number}: empty -->"
+        return f"<!-- page {page_number} -->\n\n{markdown}"
 
     # ---- helpers ---------------------------------------------------------
 

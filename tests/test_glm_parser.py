@@ -191,3 +191,69 @@ class TestConfig:
         assert GLMParser.is_configured() is True
         monkeypatch.setattr(glm_parser_module, "settings", _fake_settings(ZAI_API_KEY=None))
         assert GLMParser.is_configured() is False
+
+
+class TestPdfPages:
+    def test_per_page_blocks_and_progress(self, parser, monkeypatch):
+        p, fake = parser
+        pages = iter([(1, b"png-one"), (2, b"png-two")])
+        monkeypatch.setattr(glm_parser_module, "iter_pdf_page_pngs", lambda path: pages)
+        fake._outcomes = ["page one md", "page two md"]
+        seen = []
+        out = p.extract_pdf_pages(Path("scan.pdf"), progress=lambda c, t: seen.append((c, t)))
+        assert "<!-- page 1 -->" in out and "<!-- page 2 -->" in out
+        assert "page one md" in out and "page two md" in out
+        assert seen == [(1, 2), (2, 2)]
+        assert len(fake.calls) == 2
+        assert fake.calls[0]["messages"][0]["content"][0]["image_url"]["url"].endswith(
+            base64.b64encode(b"png-one").decode()
+        )
+
+
+class TestVideo:
+    def test_video_size_guard_blocks_oversized(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(glm_parser_module, "settings", _fake_settings(GLM_VIDEO_MAX_UPLOAD_MB=1))
+        parser = GLMParser(cache=OcrCache(tmp_path / "ocr"))
+        client, fake = _client_with(["never called"])
+        parser._client = client
+        big = tmp_path / "movie.mp4"
+        big.write_bytes(b"\0" * (2 * 1024 * 1024))
+        with pytest.raises(GLMParserError, match="GLM_VIDEO_MAX_UPLOAD_MB"):
+            parser.extract_video(big)
+        assert fake.calls == []
+
+    def test_extract_video_builds_video_data_url_block(self, parser, tmp_path):
+        p, fake = parser
+        vid = tmp_path / "clip.mp4"
+        vid.write_bytes(b"mp4-bytes")
+        out = p.extract_video(vid)
+        assert out == "# Extracted\n\nmarkdown"
+        b64 = base64.b64encode(b"mp4-bytes").decode()
+        content = fake.calls[0]["messages"][0]["content"]
+        assert content[0] == {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{b64}"}}
+        assert content[1]["text"].startswith("Produce a complete markdown record")
+
+    def test_extract_video_mov_mime(self, parser, tmp_path):
+        p, fake = parser
+        vid = tmp_path / "clip.mov"
+        vid.write_bytes(b"mov-bytes")
+        p.extract_video(vid)
+        url = fake.calls[0]["messages"][0]["content"][0]["video_url"]["url"]
+        assert url.startswith("data:video/quicktime;base64,")
+
+    def test_extract_video_cache_hit_skips_api(self, parser, tmp_path):
+        p, fake = parser
+        vid = tmp_path / "clip.mp4"
+        vid.write_bytes(b"mp4-bytes")
+        p.extract_video(vid)
+        p.extract_video(vid)
+        assert len(fake.calls) == 1
+
+    def test_video_payload_rejection_includes_hint(self, parser, tmp_path):
+        p, fake = parser
+        fake._outcomes = [ValueError("base64 video not supported")]
+        vid = tmp_path / "clip.mp4"
+        vid.write_bytes(b"mp4-bytes")
+        with pytest.raises(GLMParserError) as exc:
+            p.extract_video(vid)
+        assert "public" in str(exc.value)
