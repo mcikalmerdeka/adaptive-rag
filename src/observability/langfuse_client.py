@@ -16,7 +16,7 @@ We intentionally do NOT use ``from langfuse.openai import openai`` (the
 auto-instrumented OpenAI shim) because we route LLM calls through
 LangChain's ``ChatOpenAI`` — and the LangChain ``CallbackHandler``
 already captures token counts, model, latency, etc. for those calls.
-The Qwen OCR path uses the raw OpenAI SDK; if we want OCR traces later
+The GLM OCR path uses the raw OpenAI SDK; if we want OCR traces later
 we can wire that one call site to ``langfuse.openai`` separately.
 """
 
