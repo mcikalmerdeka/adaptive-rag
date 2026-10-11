@@ -31,6 +31,9 @@ class TestFileTypeDetector:
             (".jpg", DocumentFormat.IMAGE),
             (".jpeg", DocumentFormat.IMAGE),
             (".webp", DocumentFormat.IMAGE),
+            (".mp4", DocumentFormat.VIDEO),
+            (".mkv", DocumentFormat.VIDEO),
+            (".mov", DocumentFormat.VIDEO),
         ],
     )
     def test_known_extensions(self, ext: str, expected: DocumentFormat) -> None:
@@ -98,5 +101,6 @@ class TestFileTypeDetector:
         text = d.supported_formats_text
         assert "PDF" in text.upper()
         assert "IMAGE" in text.upper()
+        assert "VIDEO" in text.upper()
         assert ".pdf" in text
         assert ".png" in text
