@@ -20,8 +20,14 @@ import mimetypes
 from collections.abc import Callable
 from pathlib import Path
 
-from openai import APIConnectionError, APIError, OpenAI, RateLimitError
-from PIL import Image
+from openai import (
+    APIConnectionError,
+    APIError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
+from PIL import Image, ImageOps
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -64,7 +70,10 @@ VIDEO_PROMPT = (
     "- Output the markdown only. No preamble, no explanation."
 )
 
-_RETRYABLE = (RateLimitError, APIConnectionError, APIError)
+# Every openai SDK exception subclasses APIError (including 4xx status
+# errors) — retrying those deterministically re-burns credits and delays
+# the actionable error. Only genuinely transient classes may be retried.
+_RETRYABLE = (RateLimitError, APIConnectionError, InternalServerError)
 
 # Z.ai image limits: <=5 MB per image, pixels not exceeding 6000*6000, and
 # only jpg/png/jpeg are documented. Base64 inflates by ~x1.33, so act on
@@ -146,14 +155,16 @@ class GLMParser:
     def extract_video(self, file_path: str | Path) -> str:
         """Analyze a whole video file and return its markdown record."""
         path = Path(file_path)
-        raw = path.read_bytes()
+        # Guard from st_size first — reading a too-large file into memory
+        # just to reject it can OOM small deployments (HF Spaces ~2 GB RAM).
         limit = settings.GLM_VIDEO_MAX_UPLOAD_MB * 1024 * 1024
-        if len(raw) > limit:
+        if path.stat().st_size > limit:
             raise GLMParserError(
-                f"Video is {len(raw) / (1024 * 1024):.0f} MB, exceeding "
+                f"Video is {path.stat().st_size / (1024 * 1024):.0f} MB, exceeding "
                 f"GLM_VIDEO_MAX_UPLOAD_MB={settings.GLM_VIDEO_MAX_UPLOAD_MB}. "
                 "Raise the limit in .env, trim the clip, or host it at a public URL."
             )
+        raw = path.read_bytes()
         return self._extract_from_bytes(
             raw, mime_suffix=self._video_mime(path), label=path.name
         )
@@ -260,6 +271,10 @@ class GLMParser:
     @staticmethod
     def _reencode(img: Image.Image) -> bytes:
         """Downscale to the 6000 px cap when needed and save as JPEG q90."""
+        # EXIF orientation is meta-only: Pillow never rotates pixels, and a
+        # JPEG re-save drops the tag — bake the rotation in or the API gets
+        # sideways portrait photos (and the mangling is cached).
+        img = ImageOps.exif_transpose(img)
         scale = _IMAGE_MAX_SIDE / max(img.size)
         if scale < 1:
             img = img.resize(

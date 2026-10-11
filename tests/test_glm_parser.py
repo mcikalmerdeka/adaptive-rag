@@ -57,6 +57,23 @@ def _conn_error() -> APIConnectionError:
     return APIConnectionError(request=httpx.Request("POST", "https://api.z.ai/"))
 
 
+def _bad_request_error(message: str) -> Exception:
+    """A real 4xx rejection, mirroring Z.ai's error taxonomy.
+
+    Every openai SDK exception subclasses APIError, so a genuine payload
+    rejection arrives as BadRequestError — not ValueError.
+    """
+    from openai import BadRequestError
+
+    return BadRequestError(
+        message,
+        response=httpx.Response(
+            400, request=httpx.Request("POST", "https://api.z.ai/api/paas/v4/chat/completions")
+        ),
+        body={"error": {"message": message}},
+    )
+
+
 @pytest.fixture
 def parser(monkeypatch, tmp_path):
     """GLMParser with fake settings + fake client injected."""
@@ -135,11 +152,12 @@ class TestImageExtraction:
 
     def test_non_retryable_error_wrapped(self, parser, tmp_path):
         p, fake = parser
-        fake._outcomes = [ValueError("bad image")]
+        fake._outcomes = [_bad_request_error("bad image")]
         png = tmp_path / "doc.png"
         png.write_bytes(b"x")
         with pytest.raises(GLMParserError, match="bad image"):
             p.extract_image(png)
+        assert len(fake.calls) == 1  # deterministic 4xx: never retried
 
 
 class TestNormalization:
@@ -174,6 +192,19 @@ class TestNormalization:
         raw = buf.getvalue()
         data, mime = parser._prepare_image(raw, "jpeg")
         assert data == raw and mime == "jpeg"
+
+    def test_reencode_bakes_exif_orientation(self, tmp_path):
+        from PIL import Image
+
+        parser = GLMParser(api_key="k", cache=OcrCache(tmp_path / "ocr"))
+        buf = io.BytesIO()
+        img = Image.new("RGB", (2400, 3200), "white")
+        exif = Image.Exif()
+        exif[274] = 6  # portrait shot: display requires a 90° CW rotation
+        img.save(buf, format="JPEG", exif=exif.tobytes())
+        sideways = Image.open(io.BytesIO(buf.getvalue()))
+        data = parser._reencode(sideways)
+        assert Image.open(io.BytesIO(data)).size == (3200, 2400)
 
 
 class TestConfig:
@@ -251,9 +282,23 @@ class TestVideo:
 
     def test_video_payload_rejection_includes_hint(self, parser, tmp_path):
         p, fake = parser
-        fake._outcomes = [ValueError("base64 video not supported")]
+        fake._outcomes = [_bad_request_error("base64 video not supported")]
         vid = tmp_path / "clip.mp4"
         vid.write_bytes(b"mp4-bytes")
         with pytest.raises(GLMParserError) as exc:
             p.extract_video(vid)
         assert "public" in str(exc.value)
+        assert len(fake.calls) == 1  # a 400 is deterministic — no retries
+
+    def test_video_guard_does_not_read_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(glm_parser_module, "settings", _fake_settings(GLM_VIDEO_MAX_UPLOAD_MB=1))
+        parser = GLMParser(cache=OcrCache(tmp_path / "ocr"))
+        client, fake = _client_with(["never called"])
+        parser._client = client
+        reads = []
+        monkeypatch.setattr(Path, "read_bytes", lambda self: reads.append(self) or b"")
+        big = tmp_path / "huge.mp4"
+        big.write_bytes(b"\0" * (2 * 1024 * 1024))
+        with pytest.raises(GLMParserError, match="GLM_VIDEO_MAX_UPLOAD_MB"):
+            parser.extract_video(big)
+        assert reads == []  # guard decides from st_size, never loads the file
