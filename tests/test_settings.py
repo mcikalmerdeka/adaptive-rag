@@ -70,9 +70,12 @@ class TestSettings:
         """Settings created with nothing but defaults should be valid."""
         s = Settings(
             OPENAI_API_KEY=None,
-            QWEN_API_KEY=None,
-            QWEN_MODEL="qwen3-vl-plus",
-            QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            ZAI_API_KEY=None,
+            ZAI_BASE_URL="https://api.z.ai/api/paas/v4/",
+            GLM_MODEL="glm-5.3-flash",
+            GLM_REASONING_EFFORT="low",
+            GLM_MAX_TOKENS=8192,
+            GLM_VIDEO_MAX_UPLOAD_MB=20,
             QDRANT_URL=None,
             QDRANT_API_KEY=None,
             QDRANT_PATH="./qdrant_storage",
@@ -104,17 +107,21 @@ class TestSettings:
         assert s.CHUNK_SIZE == 1500
         assert s.RERANK_TOP_K == 5
         assert s.langfuse_enabled is False
-        assert s.QWEN_MODEL == "qwen3-vl-plus"
-        assert s.QWEN_BASE_URL == (
-            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        )
+        assert s.GLM_MODEL == "glm-5.3-flash"
+        assert s.ZAI_BASE_URL == "https://api.z.ai/api/paas/v4/"
+        assert s.GLM_REASONING_EFFORT == "low"
+        assert s.GLM_MAX_TOKENS == 8192
+        assert s.GLM_VIDEO_MAX_UPLOAD_MB == 20
 
     def test_langfuse_enabled_when_keys_present(self) -> None:
         s = Settings(
             OPENAI_API_KEY="sk-test",
-            QWEN_API_KEY=None,
-            QWEN_MODEL="qwen3-vl-plus",
-            QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            ZAI_API_KEY=None,
+            ZAI_BASE_URL="https://api.z.ai/api/paas/v4/",
+            GLM_MODEL="glm-5.3-flash",
+            GLM_REASONING_EFFORT="low",
+            GLM_MAX_TOKENS=8192,
+            GLM_VIDEO_MAX_UPLOAD_MB=20,
             QDRANT_URL=None,
             QDRANT_API_KEY=None,
             QDRANT_PATH="./qdrant_storage",
@@ -148,9 +155,12 @@ class TestSettings:
     def test_frozen_prevents_mutation(self) -> None:
         s = Settings(
             OPENAI_API_KEY=None,
-            QWEN_API_KEY=None,
-            QWEN_MODEL="qwen3-vl-plus",
-            QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            ZAI_API_KEY=None,
+            ZAI_BASE_URL="https://api.z.ai/api/paas/v4/",
+            GLM_MODEL="glm-5.3-flash",
+            GLM_REASONING_EFFORT="low",
+            GLM_MAX_TOKENS=8192,
+            GLM_VIDEO_MAX_UPLOAD_MB=20,
             QDRANT_URL=None,
             QDRANT_API_KEY=None,
             QDRANT_PATH="./qdrant_storage",
@@ -192,9 +202,12 @@ def _settings_with(**overrides: Any) -> Settings:
     """Build a Settings instance from the documented defaults."""
     values: dict[str, Any] = dict(
         OPENAI_API_KEY=None,
-        QWEN_API_KEY=None,
-        QWEN_MODEL="qwen3-vl-plus",
-        QWEN_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        ZAI_API_KEY=None,
+        ZAI_BASE_URL="https://api.z.ai/api/paas/v4/",
+        GLM_MODEL="glm-5.3-flash",
+        GLM_REASONING_EFFORT="low",
+        GLM_MAX_TOKENS=8192,
+        GLM_VIDEO_MAX_UPLOAD_MB=20,
         QDRANT_URL=None,
         QDRANT_API_KEY=None,
         QDRANT_PATH="./qdrant_storage",
