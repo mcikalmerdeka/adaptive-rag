@@ -53,8 +53,11 @@ docker-compose.yml
 # CI/CD (not needed in the image)
 .github/
 
-# Documentation (not needed at runtime, but README.md is needed for HF Spaces card)
+# Documentation (mostly not needed at runtime, but the Dockerfile copies the
+# architecture and project plan into the image root)
 docs/
+!docs/ARCHITECTURE.md
+!docs/PROJECT_PLAN.md
 
 # OS
 .DS_Store

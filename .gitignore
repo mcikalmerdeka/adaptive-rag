@@ -29,9 +29,8 @@ src/eval/reports/
 # Other files
 assets/
 other/
-error/
 inspiration/
-qwen_test/
+example/
 
 # AXIOM
 .agents/skills/developing-with-streamlit/
