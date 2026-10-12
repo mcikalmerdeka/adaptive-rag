@@ -67,7 +67,8 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 │  File ─► FileTypeDetector ─► ParserRouter ─► Markdown ─► Chunker      │
 │                                  │                                    │
 │                                  ├─ Docling          (default)        │
-│                                  ├─ Qwen3-VL         (image / scan)   │
+│                                  ├─ GLM-5.3-Flash   (image / scan /  │
+│                                  │              video)               │
 │                                  └─ passthrough      (.md, .txt)      │
 │                                                                       │
 │  Markdown ─► MarkdownHeaderSplitter ─► Embedder ─► Qdrant             │
@@ -109,7 +110,7 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 | Component | Library | Role |
 |---|---|---|
 | Document parsing | `docling>=2.92` | Born-digital PDFs, DOCX, PPTX, XLSX, HTML, CSV |
-| OCR | `openai>=2.33` against DashScope OpenAI-compat endpoint | Qwen3-VL-Plus for images and scanned PDFs |
+| OCR | `openai>=2.33` against Z.ai PAAS v4 endpoint | GLM-5.3-Flash for images, scanned PDFs, and videos |
 | LLM framework | `langchain>=1.2`, `langchain-core>=1.3` | Message types, prompts, structured output |
 | LLM client | `langchain-openai>=1.2` | Chat synthesis, router, NL→SQL |
 | Embeddings — dense | `langchain-openai` + `text-embedding-3-small` | 1536-dim, with SHA256 disk cache |
@@ -120,7 +121,7 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 | PDF inspection | `pypdfium2>=4.30` | Born-digital heuristic + page rendering |
 | Schema validation | `pydantic>=2.9` | Structured router output, structured NL→SQL |
 | SQL | `sqlalchemy>=2.0.36` + `psycopg[binary]>=3.2.3` | Read-only Postgres tool |
-| Retry | `tenacity>=9.x` | Qwen API resilience |
+| Retry | `tenacity>=9.x` | Z.ai API resilience |
 | UI | `gradio>=6.13` | Tabbed Chat / Ingest / Convert / Admin demo |
 | Tracing | `langfuse>=4.0` | Per-turn spans, token counts, USD cost |
 | Eval | `deepeval>=3.0` | Faithfulness / answer relevancy / contextual relevancy |
@@ -129,7 +130,7 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 ### Explicitly avoided
 
 - `celery`, `redis` — not needed; `FastAPI BackgroundTasks` is sufficient.
-- `transformers`, `torch`, `accelerate` — Qwen is API-based and FlashRank uses ONNX. Keeps the install lean and dodges Python-3.14 native-extension instability.
+- `transformers`, `torch`, `accelerate` — the vision model (GLM-5.3-Flash via Z.ai) is API-based and FlashRank uses ONNX. Keeps the install lean and dodges Python-3.14 native-extension instability.
 - `watchdog` — explicit upload via UI/API is fine.
 - CDC tooling (Debezium et al.) — query DB live via tool, never sync.
 - Prometheus / Grafana — Langfuse covers it for v1.
@@ -158,8 +159,8 @@ adaptive-rag/
 │   ├── core/                       Document → markdown
 │   │   ├── file_detector.py        Format detection + validation
 │   │   ├── docling_parser.py       Docling-backed parser
-│   │   ├── qwen_parser.py          Qwen3-VL OCR with retry + cache
-│   │   ├── parser_router.py        Picks Docling vs Qwen per file
+│   │   ├── glm_parser.py          GLM-5.3-Flash OCR + video (retry + cache)
+│   │   ├── parser_router.py        Picks Docling vs GLM per file
 │   │   └── converter.py            Public conversion API
 │   │
 │   ├── chunking/                   Markdown → header-aware chunks
@@ -225,23 +226,33 @@ adaptive-rag/
 file_type ──┐
             ├── .md / .txt ──────────────────► passthrough
             │
-            ├── .pdf ──┬─ "born-digital" ───► Docling   (fast, text layer)
-            │         └─ "scanned"  ────────► Qwen3-VL  (vision)
+            ├── .pdf ──┬─ "born-digital" ───► Docling               (fast, text layer)
+            │         └─ "scanned"  ────────► GLM-5.3-Flash         (vision)
+            │
+            ├── .mp4 / .mov / .mkv ────────► GLM-5.3-Flash         (video understanding)
             │
             ├── .docx / .pptx / .xlsx / .html / .csv ──► Docling
             │
-            └── .png / .jpg / .webp ──► Qwen3-VL  (better than Tesseract on layout)
+            └── .png / .jpg / .webp ──► GLM-5.3-Flash  (better than Tesseract on layout)
 ```
 
-The "born-digital vs scanned" decision for PDFs is a cheap heuristic: render the text layer of the first three pages and treat the file as scanned if the total extracted character count is below a small threshold. Docling has its own internal OCR fallback (EasyOCR / Tesseract); the heuristic lets us skip that path and use Qwen3-VL when accuracy matters.
+The "born-digital vs scanned" decision for PDFs is a cheap heuristic: render the text layer of the first three pages and treat the file as scanned if the total extracted character count is below a small threshold. Docling has its own internal OCR fallback (EasyOCR / Tesseract); the heuristic lets us skip that path and use GLM-5.3-Flash when accuracy matters.
 
-The user can override this routing per-file with a "Force Qwen3-VL OCR for PDFs" toggle in the Convert tab.
+The user can override this routing per-file with a "Force GLM OCR for PDFs" toggle in the Convert tab.
 
-### Qwen3-VL OCR
+### GLM-5.3-Flash vision OCR (Z.ai)
 
-Calls the DashScope OpenAI-compatible endpoint. The OCR prompt is intentionally deterministic:
+Calls Z.ai's OpenAI-compatible PAAS v4 endpoint (`https://api.z.ai/api/paas/v4/`) with the `openai` SDK. Three entry points on one client:
+
+- **Images** (`.png/.jpg/.jpeg/.webp`) — `image_url` block with a base64 data URL. `.webp` (and formats outside Z.ai's jpg/png/jpeg list) is normalized to JPEG q90 via Pillow, and oversized images are downscaled to Z.ai's 5 MB / 6000 px caps before the call.
+- **Scanned PDFs** — pages rendered to PNG by `pypdfium2` and OCR'd page by page, so per-page caching, per-page progress, and the DAG of `<!-- page N -->` markers carry over from the Docling flow.
+- **Videos** (`.mp4/.mov/.mkv`) — whole file as a `video_url` base64 data URL (guarded by `GLM_VIDEO_MAX_UPLOAD_MB`, default 20 MB; Z.ai's documented 200 MB limit applies to public-URL mode). GLM returns a timestamped markdown record whose `## [mm:ss]` headers feed the header chunker, making scenes retrievable with citations.
+
+The OCR prompt is intentionally deterministic:
 
 > Extract all text from this image into clean GitHub-flavored Markdown. Preserve table structure with pipe syntax. Preserve heading hierarchy. Do not summarize, do not add commentary. If text is illegible, write `[illegible]`.
+
+Recommended GLM-5.3-Flash request settings per Z.ai docs: `temperature=1`, `top_p=0.95`, `reasoning_effort` from `GLM_REASONING_EFFORT` (default `low`), `max_tokens` from `GLM_MAX_TOKENS` (default 8192).
 
 `tenacity` handles transient API failures with exponential backoff. The result is content-hash cached so re-uploading the same file (or re-rendering the same page from a multi-page PDF) never spends a second API call.
 
@@ -277,7 +288,7 @@ Two-pass:
   "chunk_index":   7,
   "total_chunks":  23,
   "ingested_at":   "2026-05-09T04:52:24+00:00",
-  "parser":        "docling"      // or "qwen3-vl" or "passthrough"
+  "parser":        "docling"      // or "glm-5.3-flash" or "passthrough"
 }
 ```
 
@@ -473,7 +484,7 @@ Three caches on disk, all SHA256-keyed:
 
 | Cache | Key | Rationale |
 |---|---|---|
-| OCR | `sha256(image_bytes)` | Qwen3-VL is paid per-call. Re-ingest of the same image must never re-OCR. |
+| OCR | `sha256(image_bytes)` | GLM-5.3-Flash is paid per-call. Re-ingesting the same image (or video) must never re-OCR/re-analyze. |
 | Dense embeddings | `sha256(model_name + text)` | OpenAI is paid per-token. Re-chunking with the same content must not re-embed. |
 | Reranker model | FlashRank's own | First-use download (~34 MB), reused thereafter. |
 
@@ -557,9 +568,12 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | Setting | Default | What |
 |---|---|---|
 | `OPENAI_API_KEY` | (required) | Embeddings, router, SQL gen, synthesis |
-| `QWEN_API_KEY` | (required for OCR) | DashScope endpoint |
-| `QWEN_MODEL` | `qwen3-vl-plus` | Vision model for OCR |
-| `QWEN_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | Shared Singapore domain; set to the workspace-specific `ap-southeast-1` host for production |
+| `ZAI_API_KEY` | (required for OCR + video) | Z.ai endpoint |
+| `ZAI_BASE_URL` | `https://api.z.ai/api/paas/v4/` | Z.ai's OpenAI-compatible PAAS v4 API |
+| `GLM_MODEL` | `glm-5.3-flash` | Vision + video model for OCR and video understanding |
+| `GLM_REASONING_EFFORT` | `low` | Flash thinking depth: low / high / max |
+| `GLM_MAX_TOKENS` | `8192` | Output budget per GLM call |
+| `GLM_VIDEO_MAX_UPLOAD_MB` | `20` | Video size guard (base64 x1.33; Z.ai's 200 MB cap is for URL mode) |
 | `QDRANT_URL` | `http://localhost:6333` (or unset → embedded mode) | Vector DB |
 | `QDRANT_COLLECTION` | `adaptive_rag` | Collection name |
 | `DENSE_MODEL` | `text-embedding-3-small` | Must match `DENSE_SIZE` |
@@ -592,7 +606,7 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 |---|---|---|
 | 0. Setup & infra | ✅ | Repo, deps, Docker compose, settings |
 | 1. Docling baseline | ✅ | Document → markdown for native formats |
-| 2. Parser router + Qwen | ✅ | Born-digital vs scanned heuristic, Qwen3-VL OCR with cache |
+| 2. Parser router + GLM | ✅ | Born-digital vs scanned heuristic, GLM-5.3-Flash OCR with cache, video ingestion |
 | 3. Chunking + indexing | ✅ | Header-aware chunks, hybrid Qdrant collection, dedup |
 | 4. Retrieval + chat | ✅ | Hybrid search + RRF + FlashRank + grounded answers with `[n]` citations |
 | 5. Adaptive router + SQL | ✅ | Five-strategy router, read-only SQL tool, `[DB]` citations |
@@ -609,7 +623,7 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 |---|---|---|---|
 | Routing layer | Query-time LLM classifier | Ingest-time extension matching | A PDF can have prose AND tables; routing must see the question |
 | Document parser | Docling | LangChain native loaders, LlamaParse, Marker | Free, local, table-aware, multi-format |
-| OCR | Qwen3-VL-Plus (API) | GLM-OCR (self-hosted), EasyOCR, Tesseract | No GPU, better quality on complex layouts, cheap per-image |
+| OCR | GLM-5.3-Flash via Z.ai (API) | GLM-OCR (self-hosted), EasyOCR, Tesseract | No GPU, better quality on complex layouts, cheap per-image, one model also covers video understanding |
 | Vector DB | Qdrant | pgvector, Weaviate, Chroma | Best hybrid (dense + sparse) support, server-side RRF |
 | Sparse encoder | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
 | Reranker | FlashRank `ms-marco-MiniLM-L-12-v2` | BGE-reranker-v2-m3 (Torch), Cohere Rerank (paid), ColBERT | Pure ONNX via `onnxruntime` (already pulled by `fastembed`); no Torch / Transformers; sidesteps Python-3.14 native-extension instability we hit with `py-rust-stemmers` |
@@ -639,7 +653,7 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 - **Web search fallback.** Tavily / Exa when local context is insufficient.
 - **Streaming responses.** Wire LLM streaming through Gradio for snappier UX.
 - **Multi-collection Qdrant.** Split per-domain (`policies`, `finance`, `technical`) once ingest volume justifies the operational cost.
-- **Image-in-markdown OCR.** Extract images from Docling output, OCR them with Qwen, inline the text into the parent markdown.
+- **Image-in-markdown OCR.** Extract images from Docling output, OCR them with GLM, inline the text into the parent markdown.
 
 ---
 

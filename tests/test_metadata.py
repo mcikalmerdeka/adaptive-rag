@@ -103,7 +103,7 @@ class TestBuildChunkMetadata:
         meta = build_chunk_metadata(
             doc_id="abc",
             source_path=f,
-            parser="qwen3-vl",
+            parser="glm-5.3-flash",
             pages=42,
         )
         assert meta["pages"] == 42

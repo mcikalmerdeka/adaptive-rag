@@ -16,6 +16,7 @@ from pathlib import Path
 # instead, avoiding WinError 1314 during Docling's first-run model download.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 
+from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 
@@ -32,6 +33,16 @@ class DoclingParser:
     def __init__(self) -> None:
         self._converter = DocumentConverter()
         logger.info("DoclingParser initialized")
+
+    def warm_up(self) -> None:
+        """Load the PDF pipeline now instead of on the first conversion.
+
+        ``DocumentConverter`` initializes pipelines lazily on the first
+        ``convert()``, so Docker's model-preload step must call this explicitly
+        — otherwise the image ships without the layout/TableFormer models and
+        pays the cold-start download at runtime.
+        """
+        self._converter.initialize_pipeline(InputFormat.PDF)
 
     def parse(self, file_path: str | Path) -> str:
         path = Path(file_path)

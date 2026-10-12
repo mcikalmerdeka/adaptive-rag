@@ -7,8 +7,8 @@ from .converter import (
 )
 from .docling_parser import DoclingParser, DoclingParserError
 from .file_detector import DocumentFormat, FileTypeDetector, FileTypeInfo
+from .glm_parser import GLMParser, GLMParserError
 from .parser_router import ParserRouter, ParseResult
-from .qwen_parser import QwenParser, QwenParserError
 
 __all__ = [
     "ConversionOutput",
@@ -18,9 +18,9 @@ __all__ = [
     "DoclingParserError",
     "FileTypeDetector",
     "FileTypeInfo",
+    "GLMParser",
+    "GLMParserError",
     "MarkdownConverterService",
     "ParserRouter",
     "ParseResult",
-    "QwenParser",
-    "QwenParserError",
 ]

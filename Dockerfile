@@ -1,5 +1,5 @@
 # ---- build stage: install deps + pre-download models -----------------------
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /app
 
@@ -28,7 +28,7 @@ COPY scripts/preload_models.py ./scripts/
 RUN python scripts/preload_models.py
 
 # ---- production stage: lean runtime image ----------------------------------
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy pre-downloaded model caches
@@ -52,8 +52,8 @@ COPY --from=builder /app/.cache /app/.cache
 COPY app.py ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-COPY ARCHITECTURE.md ./
-COPY PROJECT_PLAN.md ./
+COPY docs/ARCHITECTURE.md ./
+COPY docs/PROJECT_PLAN.md ./
 COPY README.md ./
 
 # HF Spaces uses port 7860 by default

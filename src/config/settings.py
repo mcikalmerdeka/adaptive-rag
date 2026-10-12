@@ -51,11 +51,13 @@ class Settings:
 
     # ---- API keys ----
     OPENAI_API_KEY: str | None
-    QWEN_API_KEY: str | None
-    # Qwen OCR (DashScope). The base URL must match the region the API key
-    # belongs to — Singapore workspace keys use the ap-southeast-1 host.
-    QWEN_MODEL: str
-    QWEN_BASE_URL: str
+    # Z.ai GLM-5.3-Flash (vision OCR: images, scanned PDFs, videos).
+    ZAI_API_KEY: str | None
+    ZAI_BASE_URL: str
+    GLM_MODEL: str
+    GLM_REASONING_EFFORT: str
+    GLM_MAX_TOKENS: int
+    GLM_VIDEO_MAX_UPLOAD_MB: int
 
     # ---- Qdrant ----
     QDRANT_URL: str | None
@@ -135,15 +137,17 @@ class Settings:
 def _load() -> Settings:
     return Settings(
         OPENAI_API_KEY=_env_optional("OPENAI_API_KEY"),
-        QWEN_API_KEY=_env_optional("QWEN_API_KEY"),
-        # Default is the shared Singapore (international) domain; set
-        # QWEN_BASE_URL to your workspace-specific ap-southeast-1 host for
-        # production (dedicated capacity + traffic isolation).
-        QWEN_MODEL=_env_str("QWEN_MODEL", "qwen3-vl-plus"),
-        QWEN_BASE_URL=_env_str(
-            "QWEN_BASE_URL",
-            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        ),
+        ZAI_API_KEY=_env_optional("ZAI_API_KEY"),
+        # Z.ai's official OpenAI-compatible PAAS v4 endpoint
+        # (https://docs.z.ai/api-reference/llm/chat-completion).
+        ZAI_BASE_URL=_env_str("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/"),
+        GLM_MODEL=_env_str("GLM_MODEL", "glm-5.3-flash"),
+        # Flash supports low/high/max only (docs.z.ai/guides/vlm/glm-5.3-flash).
+        GLM_REASONING_EFFORT=_env_str("GLM_REASONING_EFFORT", "low"),
+        GLM_MAX_TOKENS=_env_int("GLM_MAX_TOKENS", 8192),
+        # Base64 inflates videos ×1.33; Z.ai's documented URL mode allows
+        # 200 MB, but huge base64 bodies get rejected — keep uploads sane.
+        GLM_VIDEO_MAX_UPLOAD_MB=_env_int("GLM_VIDEO_MAX_UPLOAD_MB", 20),
         QDRANT_URL=_env_optional("QDRANT_URL"),
         QDRANT_API_KEY=_env_optional("QDRANT_API_KEY"),
         QDRANT_PATH=_env_str("QDRANT_PATH", "./qdrant_storage"),

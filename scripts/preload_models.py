@@ -9,11 +9,14 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-# Trigger Docling model download
+# Trigger Docling model download. warm_up() initializes the PDF pipeline,
+# which is what actually fetches the layout + TableFormer models — merely
+# constructing MarkdownConverterService() does NOT (verified: docling's
+# DocumentConverter.__init__ never calls initialize_pipeline).
 print("Pre-downloading Docling models...")
-from src.core.converter import MarkdownConverterService  # noqa: E402
+from src.core.docling_parser import DoclingParser  # noqa: E402
 
-MarkdownConverterService()
+DoclingParser().warm_up()
 print("Docling models cached.")
 
 # Trigger FlashRank model download

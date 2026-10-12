@@ -23,6 +23,7 @@ class DocumentFormat(Enum):
     TEXT = "txt"
     CSV = "csv"
     IMAGE = "image"
+    VIDEO = "video"
     UNKNOWN = "unknown"
 
 
@@ -52,6 +53,9 @@ class FileTypeDetector:
         ".jpg": DocumentFormat.IMAGE,
         ".jpeg": DocumentFormat.IMAGE,
         ".webp": DocumentFormat.IMAGE,
+        ".mp4": DocumentFormat.VIDEO,
+        ".mkv": DocumentFormat.VIDEO,
+        ".mov": DocumentFormat.VIDEO,
     }
 
     SUPPORTED_FORMATS: set[DocumentFormat] = {
@@ -64,6 +68,7 @@ class FileTypeDetector:
         DocumentFormat.TEXT,
         DocumentFormat.CSV,
         DocumentFormat.IMAGE,
+        DocumentFormat.VIDEO,
     }
 
     def detect(self, file_path: str | Path) -> FileTypeInfo:

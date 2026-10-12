@@ -62,7 +62,7 @@ class IngestionPipeline:
         self,
         file_path: str | Path,
         *,
-        force_qwen_for_pdf: bool = False,
+        force_vlm_for_pdf: bool = False,
         replace_existing: bool = True,
         skip_if_exists: bool = False,
         ocr_progress: Callable[[int, int], None] | None = None,
@@ -91,7 +91,7 @@ class IngestionPipeline:
         # Convert.
         output: ConversionOutput = self._converter.convert_detailed(
             path,
-            force_qwen_for_pdf=force_qwen_for_pdf,
+            force_vlm_for_pdf=force_vlm_for_pdf,
             progress=ocr_progress,
         )
         if not output.markdown.strip():

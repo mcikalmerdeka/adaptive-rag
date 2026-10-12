@@ -11,7 +11,7 @@ keep the schema small and stable:
       "chunk_index":      int — 0-based position in the document
       "total_chunks":     int — total chunks generated for this doc
       "ingested_at":      ISO-8601 UTC timestamp
-      "parser":           "docling" | "qwen3-vl" | "passthrough"
+      "parser":           "docling" | "glm-5.3-flash" | "passthrough"
       "pages":            int | None  (only set for PDFs)
       "extension":        ".pdf" | ".docx" | ...  (debugging convenience)
     }

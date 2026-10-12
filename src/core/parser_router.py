@@ -3,12 +3,13 @@
 Decision table:
 
     .md / .txt                                 → passthrough (read file)
-    .png / .jpg / .jpeg / .webp                → Qwen
-    .pdf scanned (heuristic)                   → Qwen (page-by-page, cached)
+    .png / .jpg / .jpeg / .webp                → GLM-5.3-Flash (image OCR)
+    .pdf scanned (heuristic)                   → GLM (page-by-page, cached)
     .pdf born-digital                          → Docling
+    .mp4 / .mkv / .mov                         → GLM (video understanding)
     .docx / .pptx / .xlsx / .html / .csv       → Docling
 
-A ``force_qwen_for_pdf`` flag lets the UI override the heuristic when the
+A ``force_vlm_for_pdf`` flag lets the UI override the heuristic when the
 user knows the OCR quality matters (e.g. mathematical layouts, tight tables).
 """
 
@@ -23,7 +24,7 @@ from src.utils import is_scanned_pdf
 
 from .docling_parser import DoclingParser
 from .file_detector import DocumentFormat, FileTypeInfo
-from .qwen_parser import QwenParser, QwenParserError
+from .glm_parser import GLMParser, GLMParserError
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ParseResult:
     markdown: str
-    parser: str  # "docling" | "qwen3-vl" | "passthrough"
+    parser: str  # "docling" | "passthrough" | the vision model code
     pages: int | None = None  # only set for PDFs
 
 
@@ -41,10 +42,10 @@ class ParserRouter:
     def __init__(
         self,
         docling: DoclingParser | None = None,
-        qwen: QwenParser | None = None,
+        glm: GLMParser | None = None,
     ) -> None:
         self._docling = docling
-        self._qwen = qwen
+        self._glm = glm
 
     # Lazy init so we don't pay startup cost for parsers we may never use.
 
@@ -53,15 +54,15 @@ class ParserRouter:
             self._docling = DoclingParser()
         return self._docling
 
-    def _get_qwen(self) -> QwenParser:
-        if self._qwen is None:
-            self._qwen = QwenParser()
-        return self._qwen
+    def _get_glm(self) -> GLMParser:
+        if self._glm is None:
+            self._glm = GLMParser()
+        return self._glm
 
     def parse(
         self,
         info: FileTypeInfo,
-        force_qwen_for_pdf: bool = False,
+        force_vlm_for_pdf: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> ParseResult:
         path = info.path
@@ -71,12 +72,15 @@ class ParserRouter:
             return self._passthrough(path)
 
         if fmt == DocumentFormat.IMAGE:
-            return self._via_qwen_image(path)
+            return self._via_glm_image(path)
+
+        if fmt == DocumentFormat.VIDEO:
+            return self._via_glm_video(path)
 
         if fmt == DocumentFormat.PDF:
             return self._handle_pdf(
                 path,
-                force_qwen=force_qwen_for_pdf,
+                force_vlm=force_vlm_for_pdf,
                 progress=progress,
             )
 
@@ -102,31 +106,44 @@ class ParserRouter:
         markdown = self._get_docling().parse(path)
         return ParseResult(markdown=markdown, parser="docling")
 
-    def _via_qwen_image(self, path: Path) -> ParseResult:
-        markdown = self._get_qwen().extract_image(path)
-        return ParseResult(markdown=markdown, parser="qwen3-vl", pages=1)
+    def _via_glm_image(self, path: Path) -> ParseResult:
+        glm = self._get_glm()
+        markdown = glm.extract_image(path)
+        return ParseResult(markdown=markdown, parser=glm.model_name)
+
+    def _via_glm_video(self, path: Path) -> ParseResult:
+        try:
+            glm = self._get_glm()
+        except GLMParserError as exc:
+            # No fallback parser can understand video — fail loudly.
+            raise ValueError(
+                f"Video ingestion requires ZAI_API_KEY. Add it to .env to "
+                f"enable video analysis ({exc})"
+            ) from exc
+        markdown = glm.extract_video(path)
+        return ParseResult(markdown=markdown, parser=glm.model_name, pages=None)
 
     def _handle_pdf(
         self,
         path: Path,
-        force_qwen: bool,
+        force_vlm: bool,
         progress: Callable[[int, int], None] | None,
     ) -> ParseResult:
-        use_qwen = force_qwen or is_scanned_pdf(path)
+        use_vlm = force_vlm or is_scanned_pdf(path)
 
-        if not use_qwen:
+        if not use_vlm:
             return self._via_docling(path)
 
-        # Try Qwen; if it isn't configured fall back to Docling so the user
+        # Try GLM; if it isn't configured fall back to Docling so the user
         # still gets something useful instead of a hard failure.
         try:
-            qwen = self._get_qwen()
-        except QwenParserError as exc:
+            glm = self._get_glm()
+        except GLMParserError as exc:
             logger.warning(
-                f"Qwen unavailable ({exc}), falling back to Docling for {path.name}"
+                f"GLM unavailable ({exc}), falling back to Docling for {path.name}"
             )
             return self._via_docling(path)
 
-        markdown = qwen.extract_pdf_pages(path, progress=progress)
+        markdown = glm.extract_pdf_pages(path, progress=progress)
         n_pages = markdown.count("<!-- page ") if markdown else 0
-        return ParseResult(markdown=markdown, parser="qwen3-vl", pages=n_pages)
+        return ParseResult(markdown=markdown, parser=glm.model_name, pages=n_pages)

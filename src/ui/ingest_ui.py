@@ -13,7 +13,7 @@ from pathlib import Path
 import gradio as gr
 
 from src.core import MarkdownConverterService
-from src.core.qwen_parser import QwenParser
+from src.core.glm_parser import GLMParser
 from src.indexing import IngestionPipeline, IngestionResult
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def _format_result(r: IngestionResult) -> str:
 
 def _ingest_files(
     files,
-    force_qwen_for_pdf: bool,
+    force_vlm_for_pdf: bool,
     skip_if_exists: bool,
     progress: gr.Progress = gr.Progress(),
 ) -> tuple[str, str]:
@@ -91,7 +91,7 @@ def _ingest_files(
 
             result = pipeline.ingest(
                 path,
-                force_qwen_for_pdf=force_qwen_for_pdf,
+                force_vlm_for_pdf=force_vlm_for_pdf,
                 skip_if_exists=skip_if_exists,
                 replace_existing=not skip_if_exists,
                 ocr_progress=_on_page,
@@ -157,7 +157,7 @@ def _delete_doc(doc_id: str) -> tuple[str, str]:
 
 def render_ingest_tab() -> None:
     """Build the Ingest tab."""
-    qwen_available = QwenParser.is_configured()
+    vlm_available = GLMParser.is_configured()
 
     gr.Markdown(
         """
@@ -181,10 +181,10 @@ def render_ingest_tab() -> None:
             )
 
             with gr.Row():
-                force_qwen = gr.Checkbox(
-                    label="Force Qwen3-VL OCR for PDFs",
+                force_vlm = gr.Checkbox(
+                    label="Force GLM OCR for PDFs",
                     value=False,
-                    interactive=qwen_available,
+                    interactive=vlm_available,
                 )
                 skip_existing = gr.Checkbox(
                     label="Skip if already indexed",
@@ -220,7 +220,7 @@ def render_ingest_tab() -> None:
 
     ingest_btn.click(
         fn=_ingest_files,
-        inputs=[file_input, force_qwen, skip_existing],
+        inputs=[file_input, force_vlm, skip_existing],
         outputs=[status_display, library_display],
     )
 

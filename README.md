@@ -26,20 +26,21 @@ See:
 ## What works today
 
 ### Phase 2 — Document → markdown
-- **Multi-format input:** `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html` / `.htm`, `.md`, `.txt`, `.csv`, `.png`, `.jpg` / `.jpeg`, `.webp`
+- **Multi-format input:** `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.html` / `.htm`, `.md`, `.txt`, `.csv`, `.png`, `.jpg` / `.jpeg`, `.webp`, `.mp4`, `.mov`, `.mkv`
 - **Smart parser routing:**
 
   | Input | Parser | Why |
   |---|---|---|
   | `.md`, `.txt` | passthrough | already markdown / plain text |
-  | `.png`, `.jpg`, `.webp` | Qwen3-VL | vision model beats local OCR |
+  | `.png`, `.jpg`, `.webp`, `.mp4`, `.mov`, `.mkv` | GLM-5.3-Flash | vision + video understanding beats local OCR |
   | `.pdf` (born-digital) | Docling | fast, free, lossless |
-  | `.pdf` (scanned) | Qwen3-VL per page | better than EasyOCR on layouts |
+  | `.pdf` (scanned) | GLM-5.3-Flash per page | better than EasyOCR on layouts |
   | `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv` | Docling | native structural parsing |
 
-- **Born-digital vs scanned heuristic:** PDFs with <150 chars of extractable text in the first 3 pages route to Qwen.
+- **Video ingestion:** `.mp4`/`.mov`/`.mkv` (≤ GLM_VIDEO_MAX_UPLOAD_MB, base64 data URL) are analyzed by GLM-5.3-Flash into timestamped markdown (`## [mm:ss]` sections), so chat retrieval answers "what happens around minute 2?" with citations.
+- **Born-digital vs scanned heuristic:** PDFs with <150 chars of extractable text in the first 3 pages route to GLM.
 - **OCR cache:** SHA256-keyed `.cache/ocr/` so re-ingesting the same file is free.
-- **Qwen retry** with exponential backoff on rate limits / transient errors.
+- **GLM retry** with exponential backoff on rate limits / transient errors.
 
 ### Phase 3 — Header-aware chunking + hybrid Qdrant indexing
 - **`MarkdownHeaderTextSplitter`** chunks on `#` / `##` / `###` and captures the path into metadata (e.g. `"Refund Policy > Eligibility"`). Sections >1500 chars are recursively split with 200-char overlap. Headers stay in the chunk content for richer embeddings.
@@ -128,7 +129,7 @@ adaptive-rag/
     ├── core/                       # Document → markdown
     │   ├── file_detector.py
     │   ├── docling_parser.py
-    │   ├── qwen_parser.py
+    │   ├── glm_parser.py             GLM-5.3-Flash OCR + video via Z.ai
     │   ├── parser_router.py
     │   └── converter.py
     ├── chunking/                   # Markdown → header-aware chunks
@@ -178,7 +179,7 @@ uv sync
 
 # 2. Copy and fill in your API keys
 cp .env.example .env
-# edit .env and set OPENAI_API_KEY and QWEN_API_KEY
+# edit .env and set OPENAI_API_KEY and ZAI_API_KEY
 
 # 3. (Optional) Start Qdrant in Docker — only if you don't want embedded mode
 docker compose up -d qdrant
@@ -206,9 +207,12 @@ Open `http://localhost:7860`.
 | Variable | Used for | Get it at |
 |---|---|---|
 | `OPENAI_API_KEY` | Dense embeddings + chat LLM + router + NL→SQL | https://platform.openai.com/ |
-| `QWEN_API_KEY` | Image + scanned PDF OCR via Qwen3-VL | https://dashscope.aliyun.com/ |
-| `QWEN_BASE_URL` (optional, default shared Singapore domain `dashscope-intl.aliyuncs.com/compatible-mode/v1`) | DashScope endpoint — set to your workspace-specific `ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` host for production (must match the region your key belongs to) | — |
-| `QWEN_MODEL` (optional, default `qwen3-vl-plus`) | Vision model used for OCR | — |
+| `ZAI_API_KEY` | Image + scanned-PDF OCR + video analysis via GLM-5.3-Flash | https://z.ai/manage-apikey/apikey-list |
+| `ZAI_BASE_URL` (optional, default `https://api.z.ai/api/paas/v4/`) | Z.ai PAAS v4 endpoint (OpenAI-compatible) | — |
+| `GLM_MODEL` (optional, default `glm-5.3-flash`) | Vision+video model used for OCR (or `glm-5.3-flashx` for ~200 tok/s) | — |
+| `GLM_REASONING_EFFORT` (optional, default `low`) | Thinking depth for ingestion calls (`low`/`high`/`max`) | — |
+| `GLM_MAX_TOKENS` (optional, default `8192`) | Output budget per GLM call (video transcripts need headroom) | — |
+| `GLM_VIDEO_MAX_UPLOAD_MB` (optional, default `20`) | Base64 video size guard (Z.ai's 200 MB cap applies to URL mode) | — |
 | `QDRANT_URL` (optional) | Connect to a remote Qdrant. Leave unset for embedded mode. | — |
 | `QDRANT_API_KEY` (optional) | Qdrant Cloud auth | https://cloud.qdrant.io/ |
 | `QDRANT_PATH` (optional) | Override the embedded storage directory | — |
@@ -229,7 +233,7 @@ Open `http://localhost:7860`.
 
 **Ingest tab** — multi-file ingestion. Each file is converted → chunked → upserted into Qdrant. The library on the right shows what's currently indexed and lets you delete by `doc_id`. Re-ingesting a file by default replaces its previous chunks; tick **Skip if already indexed** to no-op instead.
 
-**Convert tab** — single-document preview; pick a file, optionally force Qwen for PDFs, see the markdown and download.
+**Convert tab** — single-document preview; pick a file, optionally force GLM for PDFs, see the markdown and download.
 
 **Admin tab** — token + USD cost rollups pulled from Langfuse. Disabled-state instructions when `LANGFUSE_*` keys are missing.
 
@@ -253,7 +257,7 @@ uv run python -m src.observability.cost_tracker --days 7
 ## Roadmap
 
 - ✅ Phase 1: Docling baseline document conversion
-- ✅ Phase 2: Parser router (Docling + Qwen3-VL fallback) with caching
+- ✅ Phase 2: Parser router (Docling + GLM-5.3-Flash fallback) with caching + video ingestion
 - ✅ Phase 3: Header-aware chunking + hybrid (dense + BM25) Qdrant indexing
 - ✅ Phase 4: Hybrid retrieval + FlashRank reranker + grounded chat with citations
 - ✅ Phase 5: Adaptive query router + read-only SQL tool over a demo Postgres warehouse
