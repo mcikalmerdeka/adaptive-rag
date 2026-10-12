@@ -83,7 +83,7 @@ See:
   | `hybrid` | both narrative AND a number | retrieve **and** SQL → blended answer |
   | `clarify` | genuinely ambiguous | one focused follow-up question, no retrieval cost |
 
-- **Schema-aware classifier:** the router LLM (`gpt-4.1-nano` by default — cheap, fast) sees a one-line summary of the available SQL tables when classifying. If `SQL_DATABASE_URL` is unset the router is told "no SQL backend", so it never picks a strategy it can't fulfill.
+- **Schema-aware classifier:** the router LLM (`gpt-6-luna` by default, at reasoning effort `none` — fast) sees a one-line summary of the available SQL tables when classifying. If `SQL_DATABASE_URL` is unset the router is told "no SQL backend", so it never picks a strategy it can't fulfill.
 
 - **Read-only SQL tool with defense in depth:**
   1. Dedicated `adaptive_rag_ro` Postgres role (created by the seed script) with `SELECT`-only grants.
@@ -98,9 +98,9 @@ See:
   - `RERANK_TOP_K=5` (final chunks shown to the LLM, default `5`)
   - `RETRIEVAL_PREFETCH_K=25` (candidates fetched before reranking)
   - `RERANKER_MODEL` (swap to `ms-marco-TinyBERT-L-2-v2` for speed or `rank-T5-flan` for quality)
-  - `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_REASONING_MODE` (synthesis — default `gpt-5.6-luna` in pro reasoning mode)
-  - `ROUTER_MODEL`, `ROUTER_TEMPERATURE` (classifier — default `gpt-4.1-nano`)
-  - `SQL_MODEL`, `SQL_REASONING_MODE` (NL→SQL translator — default `gpt-5.6-luna` in pro reasoning mode)
+  - `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_REASONING_EFFORT` (synthesis — default `gpt-6-luna` at effort `high`)
+  - `ROUTER_MODEL`, `ROUTER_TEMPERATURE`, `ROUTER_REASONING_EFFORT` (classifier — default `gpt-6-luna` at effort `none`)
+  - `SQL_MODEL`, `SQL_REASONING_EFFORT` (NL→SQL translator — default `gpt-6-luna` at effort `high`)
   - `SQL_DATABASE_URL`, `SQL_QUERY_TIMEOUT_SEC`, `SQL_ROW_LIMIT` (Phase 5)
   - `DENSE_MODEL`, `SPARSE_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, etc.
 
@@ -220,9 +220,9 @@ Open `http://localhost:7860`.
 | `SQL_DATABASE_URL` (optional) | SQLAlchemy URL for the SQL tool. Leave unset to disable `sql_only` / `hybrid` strategies. | — |
 | `SQL_QUERY_TIMEOUT_SEC` (optional, default `5`) | Per-query Postgres `statement_timeout` | — |
 | `SQL_ROW_LIMIT` (optional, default `200`) | Implicit `LIMIT N` injected when the SQL doesn't have one | — |
-| `LLM_MODEL` (optional, default `gpt-5.6-luna`) | Synthesis LLM; `LLM_REASONING_MODE=pro` gives "GPT-5.6 Luna Pro" behaviour | — |
-| `ROUTER_MODEL` (optional, default `gpt-4.1-nano`) | Router classifier model | — |
-| `SQL_MODEL` (optional, default `gpt-5.6-luna`) | NL→SQL translator model (`SQL_REASONING_MODE=pro` by default) | — |
+| `LLM_MODEL` (optional, default `gpt-6-luna`) | Synthesis LLM; reasoning effort set via `LLM_REASONING_EFFORT` (`high` by default) | — |
+| `ROUTER_MODEL` (optional, default `gpt-6-luna`) | Router classifier model (`ROUTER_REASONING_EFFORT=none` by default) | — |
+| `SQL_MODEL` (optional, default `gpt-6-luna`) | NL→SQL translator model (`SQL_REASONING_EFFORT=high` by default) | — |
 | `LANGFUSE_PUBLIC_KEY` (optional) | Langfuse tracing — set both to enable. App is a no-op tracer when missing. | https://cloud.langfuse.com/ |
 | `LANGFUSE_SECRET_KEY` (optional) | Same as above | — |
 | `LANGFUSE_HOST` (optional, default `https://cloud.langfuse.com`) | Set to `https://us.cloud.langfuse.com` for the US region or your self-hosted URL | — |

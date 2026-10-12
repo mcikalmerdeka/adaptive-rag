@@ -84,8 +84,8 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 │       │                                                               │
 │       ▼                                                               │
 │  ┌──────────────────────┐                                             │
-│  │ AdaptiveRouter       │   cheap LLM classifier                      │
-│  │  → strategy + intent │   (gpt-4.1-nano default)                    │
+│  │ AdaptiveRouter       │   LLM classifier, effort none               │
+│  │  → strategy + intent │   (gpt-6-luna default)                      │
 │  └────────┬─────────────┘                                             │
 │           │                                                           │
 │   ┌───────┼───────────┬─────────────┬────────────────┐                │
@@ -369,7 +369,7 @@ The router is what makes this *Adaptive RAG* (per Jeong et al., 2024 — query-c
 
 ### How a decision is made
 
-A single LLM call with structured output. The classifier model is intentionally cheap (`gpt-4.1-nano` by default) — classification doesn't need frontier reasoning, and we want this on the hot path of every chat turn.
+A single LLM call with structured output. The classifier runs on the pipeline model (`gpt-6-luna` by default) but at reasoning effort `none` — classification is latency-critical and doesn't benefit from reasoning tokens, and we want this on the hot path of every chat turn.
 
 ```python
 class RouterDecision(BaseModel):
@@ -418,7 +418,7 @@ Plus `SET TRANSACTION READ ONLY` on every connection — belt + suspenders + bun
 
 ### NL → SQL
 
-A second LLM call (`gpt-5.6-luna` by default, `SQL_MODEL`) translates the router's `sql_intent` into a single `SELECT`. Schema is included in the prompt — generated once via SQLAlchemy `inspect()` at startup, formatted as DDL-style table descriptions with column types, primary keys, and foreign keys.
+A second LLM call (`gpt-6-luna` by default, `SQL_MODEL`, reasoning effort `high`) translates the router's `sql_intent` into a single `SELECT`. Schema is included in the prompt — generated once via SQLAlchemy `inspect()` at startup, formatted as DDL-style table descriptions with column types, primary keys, and foreign keys.
 
 Structured output forces a `_SqlOutput { sql: str }` schema, so the LLM can't dump prose around the query.
 
@@ -490,7 +490,7 @@ Three caches on disk, all SHA256-keyed:
 
 Default location is `./.cache/`, override with `CACHE_DIR`.
 
-Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-5.6-luna` in pro reasoning mode). Routing (`gpt-4.1-nano`) stays the cheapest stage; SQL translation is one extra call only when needed. The live numbers are tracked by Langfuse — see the next section.
+Cost-per-query in the current configuration is dominated by the synthesis LLM (`gpt-6-luna` at effort `high`). Routing (`gpt-6-luna` at effort `none`) stays the cheapest stage; SQL translation is one extra call only when needed. The live numbers are tracked by Langfuse — see the next section.
 
 ---
 
@@ -583,13 +583,14 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | `RETRIEVAL_PREFETCH_K` | `25` | Candidates fetched before rerank |
 | `RERANK_TOP_K` | `5` | Final chunks shown to the LLM |
 | `RERANKER_MODEL` | `ms-marco-MiniLM-L-12-v2` | FlashRank model |
-| `LLM_MODEL` | `gpt-5.6-luna` | Synthesis ("Luna Pro" = pro reasoning mode) |
-| `LLM_TEMPERATURE` | `0.2` | Ignored by gpt-5.6 (only `1` supported) |
-| `LLM_MAX_TOKENS` | `4096` | Output budget incl. pro-mode reasoning tokens |
-| `LLM_REASONING_MODE` | `pro` | `pro` / `standard` / `off` (gpt-5.6 family only) |
-| `ROUTER_MODEL` | `gpt-4.1-nano` | Cheap classifier |
-| `SQL_MODEL` | `gpt-5.6-luna` | NL→SQL translator |
-| `SQL_REASONING_MODE` | `pro` | Same semantics as `LLM_REASONING_MODE` |
+| `LLM_MODEL` | `gpt-6-luna` | Synthesis |
+| `LLM_TEMPERATURE` | `0.2` | Omitted automatically while reasoning effort ≠ `none` (gpt-6-luna 400s) |
+| `LLM_MAX_TOKENS` | `4096` | Output budget incl. reasoning tokens |
+| `LLM_REASONING_EFFORT` | `high` | `none` / `low` / `medium` / `high` / `xhigh` / `max` / `off` (model-dependent) |
+| `ROUTER_MODEL` | `gpt-6-luna` | Classifier (same model, effort none) |
+| `ROUTER_REASONING_EFFORT` | `none` | Fast classification; structured output safe on Chat Completions |
+| `SQL_MODEL` | `gpt-6-luna` | NL→SQL translator |
+| `SQL_REASONING_EFFORT` | `high` | Same semantics as `LLM_REASONING_EFFORT` |
 | `SQL_DATABASE_URL` | (unset) | Leave unset to disable `sql_only` / `hybrid` strategies |
 | `SQL_QUERY_TIMEOUT_SEC` | `5` | Per-query Postgres timeout |
 | `SQL_ROW_LIMIT` | `200` | Implicit `LIMIT N` injection |
@@ -627,8 +628,8 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 | Vector DB | Qdrant | pgvector, Weaviate, Chroma | Best hybrid (dense + sparse) support, server-side RRF |
 | Sparse encoder | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
 | Reranker | FlashRank `ms-marco-MiniLM-L-12-v2` | BGE-reranker-v2-m3 (Torch), Cohere Rerank (paid), ColBERT | Pure ONNX via `onnxruntime` (already pulled by `fastembed`); no Torch / Transformers; sidesteps Python-3.14 native-extension instability we hit with `py-rust-stemmers` |
-| Router LLM | `gpt-4.1-nano` | `gpt-4.1-mini`, `claude-haiku` | Cheapest model that classifies reliably; classification doesn't need frontier reasoning |
-| Synthesis LLM | `gpt-5.6-luna` + `reasoning.mode=pro` | `gpt-4.1-mini`, `gpt-5.6-terra` | Strong enough to follow citation rules, cheap enough for hot path; pro mode trades latency for answer quality |
+| Router LLM | `gpt-6-luna` + reasoning effort `none` | `gpt-4.1-nano`, `gpt-4.1-mini`, `claude-haiku` | Same model as the rest of the pipeline; effort none keeps classification fast and structured output compatible everywhere |
+| Synthesis LLM | `gpt-6-luna` + reasoning effort `high` | `gpt-4.1-mini`, `gpt-5.6-terra` | Strong enough to follow citation rules; high effort trades latency for answer quality |
 | Tool protocol | Native Python class with explicit dispatch | OpenAI function calling registry, MCP for everything | We're not an agent loop — the router *picks* a strategy, then we run it. Registry abstraction is dead weight. MCP only when external clients consume. |
 | SQL backend | Postgres in Docker bound to host port 5433 | Default 5432, SQLite, Neon | 5433 sidesteps collisions with host-installed Postgres on 5432; users can swap to Neon by changing `SQL_DATABASE_URL` |
 | Read-only enforcement | Dedicated DB role + statement allowlist + keyword regex + statement_timeout + LIMIT injection + READ ONLY transaction | Just one of those | Defense in depth — any one layer might be misconfigured |

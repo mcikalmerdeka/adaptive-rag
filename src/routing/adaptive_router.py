@@ -1,8 +1,9 @@
 """Query-time strategy classifier.
 
-Single LLM call with structured output (Pydantic). Cheap model
-(``gpt-4.1-nano`` by default) — classification doesn't need frontier
-reasoning, and we want this on the hot path of every chat turn.
+Single LLM call with structured output (Pydantic). Runs on the same
+efficient model as the rest of the pipeline (``gpt-6-luna`` by default)
+but at reasoning effort ``none`` — classification is latency-critical
+and doesn't benefit from reasoning tokens.
 """
 
 from __future__ import annotations
@@ -75,7 +76,7 @@ class AdaptiveRouter:
     ) -> None:
         self.model = model or settings.ROUTER_MODEL
         self.temperature = (
-            temperature if temperature is not None else settings.ROUTER_TEMPERATURE
+            temperature if temperature is not None else settings.router_temperature
         )
         self.sql_available = sql_available
         self.schema_summary = schema_summary or ""
@@ -84,7 +85,14 @@ class AdaptiveRouter:
             model=self.model,
             temperature=self.temperature,
             max_tokens=300,
-        ).with_structured_output(RouterDecision)
+            # Explicit effort is required, not optional: without a reasoning
+            # param gpt-6-luna defaults to medium effort, and Chat Completions
+            # only supports function calling (structured output) at effort
+            # "none". Passing the dict also routes langchain through the
+            # Responses API, which allows function calling at any effort.
+            reasoning=settings.router_reasoning,
+        )
+        self._decision_llm = self._llm.with_structured_output(RouterDecision)
 
     def classify(
         self,
@@ -114,7 +122,7 @@ class AdaptiveRouter:
         messages = self._build_messages(query, history)
         t0 = time.perf_counter()
         try:
-            decision: RouterDecision = self._llm.invoke(
+            decision: RouterDecision = self._decision_llm.invoke(
                 messages,
                 config={
                     "callbacks": get_callback_handler(),

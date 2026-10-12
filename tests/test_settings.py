@@ -88,14 +88,15 @@ class TestSettings:
             RETRIEVAL_PREFETCH_K=25,
             RERANK_TOP_K=5,
             RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-            LLM_MODEL="gpt-5.6-luna",
+            LLM_MODEL="gpt-6-luna",
             LLM_TEMPERATURE=0.2,
             LLM_MAX_TOKENS=4096,
-            LLM_REASONING_MODE="pro",
-            ROUTER_MODEL="gpt-4.1-nano",
+            LLM_REASONING_EFFORT="high",
+            ROUTER_MODEL="gpt-6-luna",
             ROUTER_TEMPERATURE=0.0,
-            SQL_MODEL="gpt-5.6-luna",
-            SQL_REASONING_MODE="pro",
+            ROUTER_REASONING_EFFORT="none",
+            SQL_MODEL="gpt-6-luna",
+            SQL_REASONING_EFFORT="high",
             SQL_DATABASE_URL=None,
             SQL_QUERY_TIMEOUT_SEC=5,
             SQL_ROW_LIMIT=200,
@@ -134,14 +135,15 @@ class TestSettings:
             RETRIEVAL_PREFETCH_K=25,
             RERANK_TOP_K=5,
             RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-            LLM_MODEL="gpt-5.6-luna",
+            LLM_MODEL="gpt-6-luna",
             LLM_TEMPERATURE=0.2,
             LLM_MAX_TOKENS=4096,
-            LLM_REASONING_MODE="pro",
-            ROUTER_MODEL="gpt-4.1-nano",
+            LLM_REASONING_EFFORT="high",
+            ROUTER_MODEL="gpt-6-luna",
             ROUTER_TEMPERATURE=0.0,
-            SQL_MODEL="gpt-5.6-luna",
-            SQL_REASONING_MODE="pro",
+            ROUTER_REASONING_EFFORT="none",
+            SQL_MODEL="gpt-6-luna",
+            SQL_REASONING_EFFORT="high",
             SQL_DATABASE_URL=None,
             SQL_QUERY_TIMEOUT_SEC=5,
             SQL_ROW_LIMIT=200,
@@ -173,14 +175,15 @@ class TestSettings:
             RETRIEVAL_PREFETCH_K=25,
             RERANK_TOP_K=5,
             RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-            LLM_MODEL="gpt-5.6-luna",
+            LLM_MODEL="gpt-6-luna",
             LLM_TEMPERATURE=0.2,
             LLM_MAX_TOKENS=4096,
-            LLM_REASONING_MODE="pro",
-            ROUTER_MODEL="gpt-4.1-nano",
+            LLM_REASONING_EFFORT="high",
+            ROUTER_MODEL="gpt-6-luna",
             ROUTER_TEMPERATURE=0.0,
-            SQL_MODEL="gpt-5.6-luna",
-            SQL_REASONING_MODE="pro",
+            ROUTER_REASONING_EFFORT="none",
+            SQL_MODEL="gpt-6-luna",
+            SQL_REASONING_EFFORT="high",
             SQL_DATABASE_URL=None,
             SQL_QUERY_TIMEOUT_SEC=5,
             SQL_ROW_LIMIT=200,
@@ -220,14 +223,15 @@ def _settings_with(**overrides: Any) -> Settings:
         RETRIEVAL_PREFETCH_K=25,
         RERANK_TOP_K=5,
         RERANKER_MODEL="ms-marco-MiniLM-L-12-v2",
-        LLM_MODEL="gpt-5.6-luna",
+        LLM_MODEL="gpt-6-luna",
         LLM_TEMPERATURE=0.2,
         LLM_MAX_TOKENS=4096,
-        LLM_REASONING_MODE="pro",
-        ROUTER_MODEL="gpt-4.1-nano",
+        LLM_REASONING_EFFORT="high",
+        ROUTER_MODEL="gpt-6-luna",
         ROUTER_TEMPERATURE=0.0,
-        SQL_MODEL="gpt-5.6-luna",
-        SQL_REASONING_MODE="pro",
+        ROUTER_REASONING_EFFORT="none",
+        SQL_MODEL="gpt-6-luna",
+        SQL_REASONING_EFFORT="high",
         SQL_DATABASE_URL=None,
         SQL_QUERY_TIMEOUT_SEC=5,
         SQL_ROW_LIMIT=200,
@@ -240,20 +244,65 @@ def _settings_with(**overrides: Any) -> Settings:
     return Settings(**values)
 
 
-class TestReasoningMode:
-    """llm_reasoning / sql_reasoning property behavior (gpt-5.6 pro mode)."""
+class TestReasoningEffort:
+    """llm_reasoning / sql_reasoning / router_reasoning property behavior."""
 
-    def test_pro_mode_is_the_default(self) -> None:
+    def test_configured_efforts_are_the_defaults(self) -> None:
         s = _settings_with()
-        assert s.llm_reasoning == {"mode": "pro"}
-        assert s.sql_reasoning == {"mode": "pro"}
+        assert s.llm_reasoning == {"effort": "high"}
+        assert s.sql_reasoning == {"effort": "high"}
+        assert s.router_reasoning == {"effort": "none"}
 
     def test_off_omits_the_reasoning_parameter(self) -> None:
-        s = _settings_with(LLM_REASONING_MODE="off", SQL_REASONING_MODE="off")
+        s = _settings_with(
+            LLM_REASONING_EFFORT="off",
+            SQL_REASONING_EFFORT="off",
+            ROUTER_REASONING_EFFORT="off",
+        )
         assert s.llm_reasoning is None
         assert s.sql_reasoning is None
+        assert s.router_reasoning is None
 
-    def test_standard_mode_passes_through(self) -> None:
-        s = _settings_with(SQL_REASONING_MODE="standard")
-        assert s.llm_reasoning == {"mode": "pro"}
-        assert s.sql_reasoning == {"mode": "standard"}
+    def test_effort_passes_through(self) -> None:
+        s = _settings_with(SQL_REASONING_EFFORT="low", ROUTER_REASONING_EFFORT="low")
+        assert s.llm_reasoning == {"effort": "high"}
+        assert s.sql_reasoning == {"effort": "low"}
+        assert s.router_reasoning == {"effort": "low"}
+
+
+class TestTemperatureOmission:
+    """Reasoning models at effort != none reject the temperature param.
+
+    Observed live on gpt-6-luna: 400 "Unsupported parameter: 'temperature'
+    is not supported with this model" at effort high; accepted at effort
+    none. Temperature is only meaningful for non-reasoning fallback models.
+    """
+
+    def test_temperature_omitted_while_reasoning_is_active(self) -> None:
+        s = _settings_with()
+        assert s.llm_temperature is None
+        assert s.sql_temperature is None
+
+    def test_temperature_kept_at_effort_none(self) -> None:
+        s = _settings_with(
+            LLM_REASONING_EFFORT="none",
+            SQL_REASONING_EFFORT="none",
+        )
+        assert s.llm_temperature == 0.2
+        assert s.sql_temperature == 0.0
+        # Router default is already effort none — temperature applies.
+        assert s.router_temperature == 0.0
+
+    def test_router_temperature_omitted_when_effort_raised(self) -> None:
+        s = _settings_with(ROUTER_REASONING_EFFORT="high")
+        assert s.router_temperature is None
+
+    def test_temperature_kept_when_reasoning_off(self) -> None:
+        s = _settings_with(
+            LLM_REASONING_EFFORT="off",
+            SQL_REASONING_EFFORT="off",
+            ROUTER_REASONING_EFFORT="off",
+        )
+        assert s.llm_temperature == 0.2
+        assert s.sql_temperature == 0.0
+        assert s.router_temperature == 0.0

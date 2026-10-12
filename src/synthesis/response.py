@@ -121,7 +121,7 @@ class GroundedAnswerer:
             )
         self.model = model or settings.LLM_MODEL
         self.temperature = (
-            temperature if temperature is not None else settings.LLM_TEMPERATURE
+            temperature if temperature is not None else settings.llm_temperature
         )
         self.max_tokens = max_tokens or settings.LLM_MAX_TOKENS
         self.snippet_chars = snippet_chars
@@ -130,8 +130,9 @@ class GroundedAnswerer:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-            # gpt-5.6 family: {"mode": "pro"} = Luna Pro behaviour. None keeps
-            # the Chat Completions path for non-reasoning models.
+            # gpt-6 family: {"effort": "high"}. A non-None dict routes
+            # langchain through the Responses API; None keeps the Chat
+            # Completions path for non-reasoning models.
             reasoning=settings.llm_reasoning,
         )
 
@@ -190,7 +191,9 @@ class GroundedAnswerer:
             raise SynthesisError(f"LLM synthesis failed: {exc}") from exc
 
         return AnswerResponse(
-            answer=(ai_msg.content or "").strip(),
+            # .text (not .content): the Responses API path returns content as
+            # a list of typed blocks; .text flattens both shapes to a string.
+            answer=(ai_msg.text or "").strip(),
             model=self.model,
         )
 
@@ -245,7 +248,9 @@ class GroundedAnswerer:
             logger.exception("LLM synthesis failed")
             raise SynthesisError(f"LLM synthesis failed: {exc}") from exc
 
-        answer_text = (ai_msg.content or "").strip()
+        # .text (not .content): the Responses API path returns content as a
+        # list of typed blocks; .text flattens both shapes to a string.
+        answer_text = (ai_msg.text or "").strip()
         cited_chunks = self._parse_cited_indices(answer_text, max_index=len(chunks))
         cited_db = bool(_DB_CITATION_PATTERN.search(answer_text)) and sql is not None
         citations = self._build_citations(chunks, cited_only=cited_chunks)

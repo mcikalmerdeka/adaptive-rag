@@ -85,16 +85,21 @@ class Settings:
     LLM_MODEL: str
     LLM_TEMPERATURE: float
     LLM_MAX_TOKENS: int
-    # gpt-5.6 reasoning mode: "pro" | "standard" | "off" (off = omit the
-    # reasoning parameter, for models outside the gpt-5.6 family).
-    LLM_REASONING_MODE: str | None
+    # Reasoning effort for the gpt-6/gpt-5.6 families: "none" | "minimal" |
+    # "low" | "medium" | "high" | "xhigh" | "max" (values are model-dependent;
+    # "off" = omit the reasoning parameter, for models outside those families).
+    LLM_REASONING_EFFORT: str | None
 
     # ---- Adaptive router (Phase 5) ----
     ROUTER_MODEL: str
     ROUTER_TEMPERATURE: float
+    # Router classification runs at effort "none": gpt-6 models only allow
+    # function calling (structured output) on Chat Completions at effort none,
+    # and classification doesn't benefit from reasoning anyway.
+    ROUTER_REASONING_EFFORT: str | None
     SQL_MODEL: str
-    # Same semantics as LLM_REASONING_MODE, for the NL->SQL translator.
-    SQL_REASONING_MODE: str | None
+    # Same semantics as LLM_REASONING_EFFORT, for the NL->SQL translator.
+    SQL_REASONING_EFFORT: str | None
 
     # ---- SQL tool (Phase 5) ----
     SQL_DATABASE_URL: str | None
@@ -118,20 +123,60 @@ class Settings:
     def llm_reasoning(self) -> dict[str, str] | None:
         """Responses API ``reasoning`` payload for the synthesis LLM.
 
-        ``None`` omits the parameter entirely — set ``LLM_REASONING_MODE=off``
-        when swapping ``LLM_MODEL`` to a model outside the gpt-5.6 family,
-        which rejects the parameter with a 400.
+        ``None`` omits the parameter entirely — set ``LLM_REASONING_EFFORT=off``
+        when swapping ``LLM_MODEL`` to a model outside the gpt-6/gpt-5.6
+        families, which rejects the parameter with a 400.
         """
-        if self.LLM_REASONING_MODE in (None, "", "off"):
+        if self.LLM_REASONING_EFFORT in (None, "", "off"):
             return None
-        return {"mode": self.LLM_REASONING_MODE}
+        return {"effort": self.LLM_REASONING_EFFORT}
+
+    @property
+    def router_reasoning(self) -> dict[str, str] | None:
+        """Same as :attr:`llm_reasoning`, for the strategy classifier."""
+        if self.ROUTER_REASONING_EFFORT in (None, "", "off"):
+            return None
+        return {"effort": self.ROUTER_REASONING_EFFORT}
 
     @property
     def sql_reasoning(self) -> dict[str, str] | None:
         """Same as :attr:`llm_reasoning`, for the NL→SQL translator."""
-        if self.SQL_REASONING_MODE in (None, "", "off"):
+        if self.SQL_REASONING_EFFORT in (None, "", "off"):
             return None
-        return {"mode": self.SQL_REASONING_MODE}
+        return {"effort": self.SQL_REASONING_EFFORT}
+
+    # ---- temperature gating ------------------------------------------------
+
+    @property
+    def llm_temperature(self) -> float | None:
+        """Temperature for the synthesis call; ``None`` omits the parameter.
+
+        Reasoning models reject ``temperature`` at any effort other than
+        ``none`` (observed live on gpt-6-luna: 400 "Unsupported parameter").
+        Omit it while reasoning is active; restore it at effort ``none`` and
+        for ``off`` (non-reasoning fallback models, e.g. gpt-4.1-mini).
+        """
+        if self.LLM_REASONING_EFFORT not in (None, "", "off", "none"):
+            return None
+        return self.LLM_TEMPERATURE
+
+    @property
+    def router_temperature(self) -> float | None:
+        """Same rule as :attr:`llm_temperature`, for the router call."""
+        if self.ROUTER_REASONING_EFFORT not in (None, "", "off", "none"):
+            return None
+        return self.ROUTER_TEMPERATURE
+
+    @property
+    def sql_temperature(self) -> float | None:
+        """Same rule as :attr:`llm_temperature`, for the NL→SQL call.
+
+        ``0.0`` for non-reasoning fallback models; omitted while reasoning
+        is active at an effort other than ``none``.
+        """
+        if self.SQL_REASONING_EFFORT not in (None, "", "off", "none"):
+            return None
+        return 0.0
 
 
 def _load() -> Settings:
@@ -160,18 +205,20 @@ def _load() -> Settings:
         RETRIEVAL_PREFETCH_K=_env_int("RETRIEVAL_PREFETCH_K", 25),
         RERANK_TOP_K=_env_int("RERANK_TOP_K", 5),
         RERANKER_MODEL=_env_str("RERANKER_MODEL", "ms-marco-MiniLM-L-12-v2"),
-        LLM_MODEL=_env_str("LLM_MODEL", "gpt-5.6-luna"),
-        # NOTE: gpt-5.6 models only support temperature=1; langchain-openai
-        # strips non-default temperatures automatically. Kept for fallback models.
+        LLM_MODEL=_env_str("LLM_MODEL", "gpt-6-luna"),
+        # NOTE: reasoning models reject the temperature parameter at any
+        # effort other than none (gpt-6-luna 400s); llm_temperature omits
+        # it automatically. This knob applies to effort none / fallback models.
         LLM_TEMPERATURE=_env_float("LLM_TEMPERATURE", 0.2),
-        # Pro-mode reasoning tokens count toward the output budget — 1024
-        # truncated grounded answers, so leave headroom.
+        # High-effort reasoning tokens count toward the output budget —
+        # small budgets truncate grounded answers, so leave headroom.
         LLM_MAX_TOKENS=_env_int("LLM_MAX_TOKENS", 4096),
-        LLM_REASONING_MODE=_env_str("LLM_REASONING_MODE", "pro"),
-        ROUTER_MODEL=_env_str("ROUTER_MODEL", "gpt-4.1-nano"),
+        LLM_REASONING_EFFORT=_env_str("LLM_REASONING_EFFORT", "high"),
+        ROUTER_MODEL=_env_str("ROUTER_MODEL", "gpt-6-luna"),
         ROUTER_TEMPERATURE=_env_float("ROUTER_TEMPERATURE", 0.0),
-        SQL_MODEL=_env_str("SQL_MODEL", "gpt-5.6-luna"),
-        SQL_REASONING_MODE=_env_str("SQL_REASONING_MODE", "pro"),
+        ROUTER_REASONING_EFFORT=_env_str("ROUTER_REASONING_EFFORT", "none"),
+        SQL_MODEL=_env_str("SQL_MODEL", "gpt-6-luna"),
+        SQL_REASONING_EFFORT=_env_str("SQL_REASONING_EFFORT", "high"),
         SQL_DATABASE_URL=_env_optional("SQL_DATABASE_URL"),
         SQL_QUERY_TIMEOUT_SEC=_env_int("SQL_QUERY_TIMEOUT_SEC", 5),
         SQL_ROW_LIMIT=_env_int("SQL_ROW_LIMIT", 200),
