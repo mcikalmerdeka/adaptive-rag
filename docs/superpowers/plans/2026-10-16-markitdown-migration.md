@@ -142,21 +142,21 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
   ParseResult(markdown: str, parser: str, pages: int | None = None)  # shape unchanged
   ```
 
-- [ ] **Step 1: Rewrite `tests/test_parser_router.py`**
+- [x] **Step 1: Rewrite `tests/test_parser_router.py`** *(implemented per the list; helper `_unconfigured_router` shared by failure tests)*
   - Stubs: `_StubMarkItDown` (`parse(path) -> "md-md"`, records calls), `_StubGLM` (keep today's shape: model_name `"glm-stub"`, extract_image/extract_pdf_pages/extract_video call records). Monkeypatch `router_module.is_scanned_pdf` per test, and `router_module.office_renderer.to_pdf` returning a tmp `.pdf` path.
   - Dispatch-matrix tests (parametrize where uniform): `.md`/`.txt` → passthrough for all 3 modes; `.html`/`.csv` → markitdown in `auto`/`plain`, and markitdown-with-degrade-log in `rendered`; `.docx`/`.pptx`/`.xlsx` → markitdown in `auto`/`plain`, and in `rendered` GLM pdf-pages (path == the stubbed exported pdf) with `pages` == block count (`"<!-- page 1 -->\n\nx"` → 1); born-digital `.pdf` → markitdown (`auto`/`plain`) and GLM (`rendered`); scanned `.pdf` → GLM in `auto` and `rendered`, markitdown in `plain`; image `.png` → GLM image in **plain** too; video → GLM video in all modes.
   - Unconfigured-GLM tests: `auto` + scanned pdf + `_get_glm` raises `GLMParserError` → result from markitdown stub + logger warning (caplog); `rendered` + scanned pdf + same → `pytest.raises(GLMParserError)`; video + same → `pytest.raises(ValueError, match="ZAI_API_KEY")` (today's contract).
   - `test_bad_parse_mode_raises_valueerror` → match `"parse_mode"`.
-- [ ] **Step 2: Run to verify FAIL** (module still routes on force_vlm / docling)
-- [ ] **Step 3: Implement the rewrite** per spec §3 decision table:
+- [x] **Step 2: Run to verify FAIL** (module still routes on force_vlm / docling)
+- [x] **Step 3: Implement the rewrite** per spec §3 decision table:
   - Validate mode first (`validate_parse_mode`).
   - `MARKDOWN/TEXT` → `_passthrough`; `IMAGE`/`VIDEO` → GLM paths unchanged (mode-independent); `HTML/CSV` → markitdown plain (+ `logger.info` "rendered mode not applicable for <ext>, falling back to plain" only when mode == "rendered"); `DOCX/PPTX/XLSX` → `rendered` ? `_via_glm_rendered(path, progress)` : `_via_markitdown(path)`; `PDF` → `_handle_pdf`.
   - `_handle_pdf`: scanned = `is_scanned_pdf(path)`; if mode == "plain" → warn-if-scanned + markitdown; if mode == "auto" and not scanned → markitdown; else (rendered, or auto+scanned) → try `_get_glm()` → `GLMParserError` propagates in `rendered`, but in `auto` is caught → `logger.warning` + markitdown fallback. Success → `_via_glm_pdf(path, progress)`.
   - `_via_glm_pdf`: `markdown = glm.extract_pdf_pages(path, progress)`; pages = `markdown.count("<!-- page ")` or None.
   - `_via_glm_rendered` (office): `pdf = office_renderer.to_pdf(path)`; then same as `_via_glm_pdf` with the **exported** path.
   - `ParseResult.parser`: `"markitdown"` / `"passthrough"` / `glm.model_name`. Docstring decision table copied from spec §3.
-- [ ] **Step 4: Run to verify PASS** — plus `tests/test_markitdown_parser.py`, `tests/test_office_renderer.py` green. (Other tests may still be red — `src/core/__init__.py` still imports docling; fixed in Task 5.)
-- [ ] **Step 5: Commit** `refactor: route documents by parse_mode with markitdown plain + GLM rendered paths`
+- [x] **Step 4: Run to verify PASS** — plus `tests/test_markitdown_parser.py`, `tests/test_office_renderer.py` green. (Other tests may still be red — `src/core/__init__.py` still imports docling; fixed in Task 2's ruling, so the full suite is green here: 237/237.)
+- [x] **Step 5: Commit** `refactor: route documents by parse_mode with markitdown plain + GLM rendered paths`
 
 ---
 
