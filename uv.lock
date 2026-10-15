@@ -10,7 +10,7 @@ resolution-markers = [
 [[package]]
 name = "adaptiverag"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "deepeval" },
     { name = "fastembed" },
@@ -28,6 +28,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pypdfium2" },
+    { name = "pytest" },
     { name = "python-dotenv" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "qdrant-client" },
@@ -53,6 +54,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "pypdfium2", specifier = ">=5.14.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "qdrant-client", specifier = ">=1.19.1" },
