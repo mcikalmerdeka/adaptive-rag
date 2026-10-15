@@ -198,9 +198,9 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 - Consumes: `MarkdownConverterService.convert_detailed(..., parse_mode="auto", ...)` (Task 5).
 - Produces: `IngestionPipeline.ingest(file_path, *, parse_mode="auto", replace_existing=True, skip_if_exists=False, ocr_progress=None) -> IngestionResult`.
 
-- [ ] **Step 1: Edit `ingest`** — add `parse_mode="auto"` keyword-only param; pass `parse_mode=parse_mode` into `convert_detailed`; log parser readiness changes only. No behavioral tests here (router/converter tests own behavior; pipeline has none today).
-- [ ] **Step 2: Verify** `.venv\Scripts\python.exe -m pytest tests/ -q` → all green, no regressions.
-- [ ] **Step 3: Commit** `feat: thread parse_mode through ingestion pipeline`
+- [x] **Step 1: Edit `ingest`** — add `parse_mode="auto"` keyword-only param; pass `parse_mode=parse_mode` into `convert_detailed`; log parser readiness changes only. No behavioral tests here (router/converter tests own behavior; pipeline has none today).
+- [x] **Step 2: Verify** `.venv\Scripts\python.exe -m pytest tests/ -q` → all green, no regressions (239/239).
+- [x] **Step 3: Commit** `feat: thread parse_mode through ingestion pipeline`
 
 ---
 
