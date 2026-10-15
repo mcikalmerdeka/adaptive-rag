@@ -9,8 +9,8 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-# FlashRank model download. The old Docling preload block was removed with
-# the docling->markitdown migration; markitdown needs no model downloads.
+# FlashRank model download. The first-gen layout model preload was removed
+# with the markitdown migration; markitdown needs no model downloads.
 
 # Trigger FlashRank model download
 print("Pre-downloading FlashRank model...")

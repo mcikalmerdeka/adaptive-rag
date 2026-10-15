@@ -19,7 +19,7 @@ COPY src/ ./src/
 # Install dependencies in system Python
 RUN uv pip install --system -e "."
 
-# Pre-download Docling models and FlashRank model during build
+# Pre-download the FlashRank model during build (markitdown needs no models)
 # This avoids 1-2 minute cold-start penalty on HF Spaces
 ENV HF_HUB_DISABLE_SYMLINKS=1
 ENV HF_HOME=/app/.cache/huggingface

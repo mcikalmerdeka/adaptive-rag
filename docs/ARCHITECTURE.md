@@ -66,9 +66,11 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 │                                                                       │
 │  File ─► FileTypeDetector ─► ParserRouter ─► Markdown ─► Chunker      │
 │                                  │                                    │
-│                                  ├─ Docling          (default)        │
-│                                  ├─ GLM-5.3-Flash   (image / scan /  │
-│                                  │              video)               │
+│                                  ├─ MarkItDown        (plain default)  │
+│                                  ├─ office_renderer (rendered:         │
+│                                  │        COM/soffice export to PDF)   │
+│                                  ├─ GLM-5.3-Flash   (image / scanned / │
+│                                  │   rendered pages / video)          │
 │                                  └─ passthrough      (.md, .txt)      │
 │                                                                       │
 │  Markdown ─► MarkdownHeaderSplitter ─► Embedder ─► Qdrant             │
@@ -109,7 +111,8 @@ A hybrid Adaptive RAG system. Each query is classified at runtime into one of fi
 
 | Component | Library | Role |
 |---|---|---|
-| Document parsing | `docling>=2.92` | Born-digital PDFs, DOCX, PPTX, XLSX, HTML, CSV |
+| Document parsing (plain) | `markitdown[all]>=0.1.8` | Born-digital PDFs, DOCX, PPTX, XLSX, HTML, CSV |
+| Document rendering (rendered mode) | `pywin32` (Windows, COM) or LibreOffice `soffice`; Windows `docx2pdf`-style COM export | DOCX/PPTX/XLSX → PDF for per-page GLM OCR |
 | OCR | `openai>=2.33` against Z.ai PAAS v4 endpoint | GLM-5.3-Flash for images, scanned PDFs, and videos |
 | LLM framework | `langchain>=1.2`, `langchain-core>=1.3` | Message types, prompts, structured output |
 | LLM client | `langchain-openai>=1.2` | Chat synthesis, router, NL→SQL |
@@ -158,10 +161,11 @@ adaptive-rag/
 │   │
 │   ├── core/                       Document → markdown
 │   │   ├── file_detector.py        Format detection + validation
-│   │   ├── docling_parser.py       Docling-backed parser
-│   │   ├── glm_parser.py          GLM-5.3-Flash OCR + video (retry + cache)
-│   │   ├── parser_router.py        Picks Docling vs GLM per file
-│   │   └── converter.py            Public conversion API
+│   │   ├── markitdown_parser.py    MarkItDown-backed plain parser
+│   │   ├── office_renderer.py      Office COM / LibreOffice export to PDF (rendered mode)
+│   │   ├── glm_parser.py           GLM-5.3-Flash OCR + video (retry + cache)
+│   │   ├── parser_router.py        Picks plain vs rendered per parse_mode
+│   │   └── converter.py            Public conversion API (auto / plain / rendered)
 │   │
 │   ├── chunking/                   Markdown → header-aware chunks
 │   │   ├── markdown_chunker.py     Header splitter + recursive fallback
@@ -223,29 +227,33 @@ adaptive-rag/
 ### Parser routing
 
 ```
-file_type ──┐
-            ├── .md / .txt ──────────────────► passthrough
+file_type ──┐   (mode: auto ─ default / plain / rendered)
+            ├── .md / .txt ──────────────────► passthrough            (every mode)
             │
-            ├── .pdf ──┬─ "born-digital" ───► Docling               (fast, text layer)
-            │         └─ "scanned"  ────────► GLM-5.3-Flash         (vision)
+            ├── .pdf ──┬─ "born-digital" ───► MarkItDown              (fast, text layer)
+            │          ├─ "scanned"  ────────► GLM-5.3-Flash         (vision, per page)
+            │          └─ mode=rendered ────► GLM-5.3-Flash         (always, per page)
             │
-            ├── .mp4 / .mov / .mkv ────────► GLM-5.3-Flash         (video understanding)
+            ├── .mp4 / .mov / .mkv ────────► GLM-5.3-Flash          (video understanding)
             │
-            ├── .docx / .pptx / .xlsx / .html / .csv ──► Docling
+            ├── .docx / .pptx / .xlsx ──┬─ auto / plain ─► MarkItDown
+            │                          └─ rendered ──► office_renderer → GLM-5.3-Flash
             │
-            └── .png / .jpg / .webp ──► GLM-5.3-Flash  (better than Tesseract on layout)
+            ├── .html / .csv ──────────────► MarkItDown               (rendered degrades to plain)
+            │
+            └── .png / .jpg / .webp ──────► GLM-5.3-Flash            (always — no plain path)
 ```
 
-The "born-digital vs scanned" decision for PDFs is a cheap heuristic: render the text layer of the first three pages and treat the file as scanned if the total extracted character count is below a small threshold. Docling has its own internal OCR fallback (EasyOCR / Tesseract); the heuristic lets us skip that path and use GLM-5.3-Flash when accuracy matters.
+The "born-digital vs scanned" decision for PDFs is a cheap heuristic: render the text layer of the first three pages and treat the file as scanned if the total extracted character count is below a small threshold. `auto` uses it to stay cheap on digital files and reach for GLM-5.3-Flash only when there is no text layer to read.
 
-The user can override this routing per-file with a "Force GLM OCR for PDFs" toggle in the Convert tab.
+Processing modes replace the old "Force GLM OCR" toggle: **Auto** (heuristic above), **Plain** (MarkItDown on everything, even scanned PDFs — cheap first pass), and **Rendered** (office docs export to PDF via Word/PowerPoint/Excel COM or LibreOffice, then every page is OCR'd by GLM-5.3-Flash — the quality path for complex layouts).
 
 ### GLM-5.3-Flash vision OCR (Z.ai)
 
 Calls Z.ai's OpenAI-compatible PAAS v4 endpoint (`https://api.z.ai/api/paas/v4/`) with the `openai` SDK. Three entry points on one client:
 
 - **Images** (`.png/.jpg/.jpeg/.webp`) — `image_url` block with a base64 data URL. `.webp` (and formats outside Z.ai's jpg/png/jpeg list) is normalized to JPEG q90 via Pillow, and oversized images are downscaled to Z.ai's 5 MB / 6000 px caps before the call.
-- **Scanned PDFs** — pages rendered to PNG by `pypdfium2` and OCR'd page by page, so per-page caching, per-page progress, and the DAG of `<!-- page N -->` markers carry over from the Docling flow.
+- **Scanned PDFs** — pages rendered to PNG by `pypdfium2` and OCR'd page by page, so per-page caching, per-page progress, and the DAG of `<!-- page N -->` markers carry over identically for office documents exported to PDF in rendered mode.
 - **Videos** (`.mp4/.mov/.mkv`) — whole file as a `video_url` base64 data URL (guarded by `GLM_VIDEO_MAX_UPLOAD_MB`, default 20 MB; Z.ai's documented 200 MB limit applies to public-URL mode). GLM returns a timestamped markdown record whose `## [mm:ss]` headers feed the header chunker, making scenes retrievable with citations.
 
 The OCR prompt is intentionally deterministic:
@@ -288,7 +296,7 @@ Two-pass:
   "chunk_index":   7,
   "total_chunks":  23,
   "ingested_at":   "2026-05-09T04:52:24+00:00",
-  "parser":        "docling"      // or "glm-5.3-flash" or "passthrough"
+  "parser":        "markitdown"   // or "glm-5.3-flash" or "passthrough"
 }
 ```
 
@@ -606,7 +614,7 @@ Every tunable lives in `src/config/settings.py` — a frozen `Settings` dataclas
 | Phase | Status | Description |
 |---|---|---|
 | 0. Setup & infra | ✅ | Repo, deps, Docker compose, settings |
-| 1. Docling baseline | ✅ | Document → markdown for native formats |
+| 1. MarkItDown baseline | ✅ | Document → markdown for native formats |
 | 2. Parser router + GLM | ✅ | Born-digital vs scanned heuristic, GLM-5.3-Flash OCR with cache, video ingestion |
 | 3. Chunking + indexing | ✅ | Header-aware chunks, hybrid Qdrant collection, dedup |
 | 4. Retrieval + chat | ✅ | Hybrid search + RRF + FlashRank + grounded answers with `[n]` citations |
@@ -623,7 +631,7 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 | Decision | Chosen | Rejected | Reason |
 |---|---|---|---|
 | Routing layer | Query-time LLM classifier | Ingest-time extension matching | A PDF can have prose AND tables; routing must see the question |
-| Document parser | Docling | LangChain native loaders, LlamaParse, Marker | Free, local, table-aware, multi-format |
+| Document parser | MarkItDown + dual plain/rendered modes | Docling (model-heavy startup), LangChain native loaders, LlamaParse, Marker | Free, local, table-aware, multi-format; rendered mode adds per-page vision OCR paths |
 | OCR | GLM-5.3-Flash via Z.ai (API) | GLM-OCR (self-hosted), EasyOCR, Tesseract | No GPU, better quality on complex layouts, cheap per-image, one model also covers video understanding |
 | Vector DB | Qdrant | pgvector, Weaviate, Chroma | Best hybrid (dense + sparse) support, server-side RRF |
 | Sparse encoder | BM25 via FastEmbed | SPLADE, no sparse | Free, fast, no GPU |
@@ -654,7 +662,7 @@ See `PROJECT_PLAN.md` for the full phase-by-phase task list and acceptance crite
 - **Web search fallback.** Tavily / Exa when local context is insufficient.
 - **Streaming responses.** Wire LLM streaming through Gradio for snappier UX.
 - **Multi-collection Qdrant.** Split per-domain (`policies`, `finance`, `technical`) once ingest volume justifies the operational cost.
-- **Image-in-markdown OCR.** Extract images from Docling output, OCR them with GLM, inline the text into the parent markdown.
+- **Image-in-markdown OCR.** OCR embedded images of office docs via the rendered pipeline (already covered today); born-digital PDF embedded images could reuse the same per-page path.
 
 ---
 
