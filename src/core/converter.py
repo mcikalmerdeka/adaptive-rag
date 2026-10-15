@@ -13,9 +13,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .docling_parser import DoclingParserError
 from .file_detector import FileTypeDetector, FileTypeInfo
 from .glm_parser import GLMParserError
+from .markitdown_parser import MarkItDownParserError
 from .parser_router import ParserRouter, ParseResult
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class MarkdownConverterService:
                 force_vlm_for_pdf=force_vlm_for_pdf,
                 progress=progress,
             )
-        except (DoclingParserError, GLMParserError) as exc:
+        except (MarkItDownParserError, GLMParserError) as exc:
             raise DocumentConverterError(str(exc)) from exc
         except (ValueError, FileNotFoundError):
             raise
