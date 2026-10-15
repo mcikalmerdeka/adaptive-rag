@@ -100,7 +100,7 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
   Test seams (module-level, monkeypatchable): `_com_export(source: Path, dest: Path) -> bool`, `_soffice_export(source: Path, out_dir: Path, timeout: int = 600) -> bool`, `_find_soffice() -> str | None`.
 - Rendered-capable extensions: `{".docx", ".pptx", ".xlsx"}`; anything else → `ValueError`.
 
-- [ ] **Step 1: Write the failing tests in `tests/test_office_renderer.py`**
+- [x] **Step 1: Write the failing tests in `tests/test_office_renderer.py`** *(implemented as listed; the fake COM recorder is a chainable `Dispatch`-capable proxy)*
   - `test_dest_is_content_hashed` — two files with the same stem but different bytes in one `out_dir=None`-run (`out_dir` given as tmp): returned names differ and equal `f"{stem}_{sha256[:8]}.pdf"` (compute expected hash in the test).
   - `test_skip_if_exists_reuses_export` — pre-create the expected dest file with marker bytes; monkeypatch `_com_export` to fail-fast (raise if called); `to_pdf` returns that path with marker bytes intact.
   - `test_com_export_takes_precedence` — `_com_export` stub returns True (writes dest): returns dest; `_soffice_export` **not** called.
@@ -111,14 +111,14 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
   - `test_format_codes_per_app` — monkeypatch `sys.modules["win32com.client"]` with a fake module whose `Dispatch` returns a recorder per ProgID: `"Word.Application"` → object whose `Documents.Open(...)` yields a doc recording `SaveAs2(dest, fmt)`; same idea for PowerPoint (`Presentations.Open` → `SaveAs(dest, fmt)`), Excel (`Workbooks.Open(path, UpdateLinks=0, ReadOnly=True)` → `ExportAsFixedFormat(fmt, dest)`). Parametrize ext→expected: docx→17, pptx→32, xlsx→0; also assert Word popen called with `ReadOnly=True`.
   - `test_com_unavailable_falls_to_soffice_realpath` — `monkeypatch.setitem(sys.modules, "win32com.client", None)` (simulates Linux without pywin32: `import` raises from None entry) + `_soffice_export` stub True → still succeeds.
   - `test_available_engine_*` — with fake win32com present → `"com"`; with win32 hidden (`None` entry) and `_find_soffice`→`"soffice.exe"` → `"soffice"`; both absent → `"none"`.
-- [ ] **Step 2: Run tests to verify they fail** (module missing)
-- [ ] **Step 3: Implement `src/core/office_renderer.py`**
+- [x] **Step 2: Run tests to verify they fail** (module missing)
+- [x] **Step 3: Implement `src/core/office_renderer.py`** *(per Task 3 ledger ruling: child-module held via `importlib.import_module` + defensive Dispatch check)*
   - `to_pdf`: normalize inputs; extension gate; default `out_dir = settings.CACHE_DIR / "office_pdf"` (mkdir parents=True); dest `f"{stem}_{sha256(source_bytes)[:8]}.pdf"`; return early if dest exists; try `_com_export(source, dest)` → True returns dest; else `_soffice_export(source, out_dir)` → True: locate `<out_dir>/<stem>.pdf`, overwrite-rename it onto dest, return dest; else `RuntimeError` carrying notebook-style guidance: `No layout engine available to render '<name>' to PDF. Option A: install MS Office; Option B: install LibreOffice (soffice on PATH); Option C: export the PDF yourself and use plain mode instead.`
   - `_com_export`: try `import win32com.client` (ImportError → False); Dispatch per suffix (`docx` Word: `Documents.Open(str(src), ReadOnly=True)` → doc, `SaveAs2(str(dest), 17)`, doc `Close(False)`; `pptx` PowerPoint: `Presentations.Open(str(src.resolve()), True, False, False)` → `SaveAs(str(dest.resolve()), 32)`, `Close()`; `xlsx` Excel: `DisplayAlerts=False`, `Workbooks.Open(str(src.resolve()), 0, True)` → `ExportAsFixedFormat(0, str(dest.resolve()))`, `wb.Close(False)`); `app.Quit()` in finally; any exception → `logger.warning` + False (no dest-verify step needed: bool contract).
   - `_soffice_export`: `_find_soffice()` → `shutil.which("soffice") or shutil.which("soffice.exe")`; None → False; else `subprocess.run([soffice, "--headless", "--norestore", "--convert-to", "pdf", "--outdir", str(out_dir), str(source)], check=True, capture_output=True, timeout=timeout)` → True/False on exceptions (CalledProcessError/Timeout → warning log + False).
   - `available_engine`: try `import win32com.client` → `"com"` (ImportError → None fallthrough); `elif _find_soffice()` → `"soffice"`; else `"none"`.
-- [ ] **Step 4: Run tests to verify they pass** (all PASS; also rerun `tests/test_markitdown_parser.py` to prove no cross-breakage)
-- [ ] **Step 5: Commit** `feat: add office_renderer with COM/soffice auto-detect and content-keyed PDF cache`
+- [x] **Step 4: Run tests to verify they pass** (all PASS; also rerun `tests/test_markitdown_parser.py` to prove no cross-breakage)
+- [x] **Step 5: Commit** `feat: add office_renderer with COM/soffice auto-detect and content-keyed PDF cache`
 
 ---
 
