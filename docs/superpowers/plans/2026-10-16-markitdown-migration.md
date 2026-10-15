@@ -257,12 +257,8 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 
 **Files:** none new; repo state check.
 
-- [ ] **Step 1: Full suite** `.venv\Scripts\python.exe -m pytest tests/ -v` → all PASS.
-- [ ] **Step 2: Service smoke with a real file**
-  ```powershell
-  .venv\Scripts\python.exe -c "import tempfile, pathlib; from src.core import MarkdownConverterService; p = pathlib.Path(tempfile.mkdtemp()) / 's.csv'; p.write_text('name,qty\nwidget,3\n'); out = MarkdownConverterService().convert_detailed(p, parse_mode='plain'); print(out.parser, '|', out.markdown.count('widget'))"
-  ```
-  Expected: `markitdown | 1` (or ≥1).
-- [ ] **Step 3: Lockfile consistency** — `uv lock --check` exits 0 (older uv: `--locked`).
-- [ ] **Step 4: Push** `git push origin feat/docling-to-markitdown-migration` (no merge — owner merges).
-- [ ] **Step 5: Report back** — summary of tasks completed, remaining manual checks for the owner: Convert tab (docx/pptx/xlsx plain + rendered with real Office COM; scanned + born-digital PDFs), Ingest tab radios, re-ingest cache behavior.
+- [x] **Step 1: Full suite** `.venv\Scripts\python.exe -m pytest tests/ -v` → all PASS. (239/239)
+- [x] **Step 2: Service smoke with a real file** *(output: `markitdown | 1` — exact expected)*
+- [x] **Step 3: Lockfile consistency** — `uv lock --check` exits 0.
+- [x] **Step 4: Push** `git push origin feat/docling-to-markitdown-migration` (no merge — owner merges).
+- [ ] **Step 5: Report back** — summary of tasks completed, remaining manual checks for the owner: Convert tab (docx/pptx/xlsx plain + rendered with real Office COM; scanned + born-digital PDFs), Ingest tab radios, re-ingest cache behavior. *(happens in the agent's final message after whole-branch review)*
