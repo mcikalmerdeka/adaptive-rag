@@ -45,15 +45,15 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 - Consumes: nothing
 - Produces: installed `pywin32` in `.venv`; `langchain-docling` gone; clean lockfiles everything later imports against
 
-- [ ] **Step 1: Edit `pyproject.toml`** — remove the `"langchain-docling>=3.0.0",` line; add `"pywin32; sys_platform == 'win32'",`. Alphabetical position (after `psycopg[binary]`).
-- [ ] **Step 2: Edit `requirements.txt`** — remove `langchain-docling`; add `pywin32; sys_platform == 'win32'` after `psycopg[binary]`.
-- [ ] **Step 3: Re-lock and install** — run `uv lock` then `uv sync`. Expected: exits 0; `pywin32` appears in the resolution for Windows.
-- [ ] **Step 4: Verify imports**
+- [x] **Step 1: Edit `pyproject.toml`** — remove the `"langchain-docling>=3.0.0",` line; add `"pywin32; sys_platform == 'win32'",`. Alphabetical position (after `psycopg[binary]`).
+- [x] **Step 2: Edit `requirements.txt`** — remove `langchain-docling`; add `pywin32; sys_platform == 'win32'` after `psycopg[binary]`.
+- [x] **Step 3: Re-lock and install** — run `uv lock` then `uv sync`. Expected: exits 0; `pywin32` appears in the resolution for Windows.
+- [x] **Step 4: Verify imports**
   ```powershell
   .venv\Scripts\python.exe -c "import pywin32; import win32com.client; import markitdown, pypdfium2; print('ok')"
   ```
   Expected: `ok`
-- [ ] **Step 5: Commit** `chore: swap langchain-docling for pywin32 (win32-only marker) and re-lock`
+- [x] **Step 5: Commit** `chore: swap langchain-docling for pywin32 (win32-only marker) and re-lock`
 
 ---
 
