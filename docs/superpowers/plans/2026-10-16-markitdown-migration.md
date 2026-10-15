@@ -243,13 +243,13 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 
 **Interfaces:** Consumes nothing beyond prior tasks; Produces an externals-consistent repo.
 
-- [ ] **Step 1: Sweep every docling mention** in the files above with the spec's replacements (Docling→MarkItDown; module tree entry `docling_parser.py` → `markitdown_parser.py` + add `office_renderer.py`; parser sample → `"markitdown"`; first-run note loses the ~1-2 GB Docling model sentence; heuristic paragraph drops the Docling-EasyOCR comparison and instead contrasts plain vs rendered modes).
-- [ ] **Step 2: Grep gate**
+- [x] **Step 1: Sweep every docling mention** in the files above with the spec's replacements (Docling→MarkItDown; module tree entry `docling_parser.py` → `markitdown_parser.py` + add `office_renderer.py`; parser sample → `"markitdown"`; first-run note loses the ~1-2 GB Docling model sentence; heuristic paragraph drops the Docling-EasyOCR comparison and instead contrasts plain vs rendered modes).
+- [x] **Step 2: Grep gate**
   ```powershell
   Select-String -Path src\*,tests\*,scripts\*,app.py,Dockerfile,pyproject.toml,requirements.txt -Pattern docling -SimpleMatch
   ```
-  Expected: zero hits. (Historical docs like git reports, `docs/superpowers/` specs/plans from prior migrations, and this migration's own docs are excluded.)
-- [ ] **Step 3: Commit** `docs: rebrand document parsing around markitdown and drop docling plumbing`
+  Expected: zero hits. (Historical docs like git reports, `docs/superpowers/` specs/plans from prior migrations, and this migration's own docs are excluded.) *(Gate output: 0; ARCHITECTURE.md decision-log retains two historical mentions — excluded per the gate.)*
+- [x] **Step 3: Commit** `docs: rebrand document parsing around markitdown and drop docling plumbing`
 
 ---
 
