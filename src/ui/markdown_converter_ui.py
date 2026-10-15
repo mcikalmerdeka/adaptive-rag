@@ -14,6 +14,7 @@ import gradio as gr
 
 from src.core import DocumentConverterError, MarkdownConverterService
 from src.core.glm_parser import GLMParser
+from src.core.office_renderer import available_engine
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ def _format_file_info(file_info) -> str:
 
 def _convert_document(
     file_info,
-    force_vlm_for_pdf: bool,
+    parse_mode: str,
     progress: gr.Progress = gr.Progress(),
 ) -> tuple[str, str, gr.DownloadButton]:
     file_path = _resolve_path(file_info)
@@ -102,7 +103,7 @@ def _convert_document(
 
         output = service.convert_detailed(
             file_path,
-            force_vlm_for_pdf=force_vlm_for_pdf,
+            parse_mode=parse_mode,
             progress=_on_page,
         )
 
@@ -169,16 +170,28 @@ def render_convert_tab() -> None:
         else "ZAI_API_KEY not set. Image, scanned-PDF, and video analysis "
         "will fail. Add it to .env to enable."
     )
+    engine = available_engine()
+    engine_note = {
+        "com": "Rendered-mode engine: MS Office COM is available (Word/PowerPoint/Excel).",
+        "soffice": "Rendered-mode engine: LibreOffice found (soffice on PATH).",
+        "none": (
+            "Rendered-mode engine: none found — Rendered mode will fail with "
+            "guidance. Install MS Office or put LibreOffice's soffice on PATH. "
+            "Auto and Plain modes still work."
+        ),
+    }[engine]
 
     gr.Markdown(
         """
         ### Convert any document to clean markdown
 
-        The router picks the best parser per file:
+        Pick a processing mode; the router picks the parser per file:
 
-        - **Docling** for `.pdf` (born-digital), `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv`
+        - **MarkItDown** for `.pdf` (born-digital), `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv`
         - **GLM-5.3-Flash** for images, scanned PDFs, and videos
         - **Passthrough** for `.md` and `.txt`
+
+        Images and videos always use GLM — they have no plain path.
         """
     )
 
@@ -196,15 +209,21 @@ def render_convert_tab() -> None:
                 value="Upload a document to get started."
             )
 
-            force_vlm = gr.Checkbox(
-                label="Force GLM OCR for PDFs",
-                value=False,
+            parse_mode_input = gr.Radio(
+                choices=[
+                    ("Auto (default)", "auto"),
+                    ("Plain (MarkItDown)", "plain"),
+                    ("Rendered + LLM (GLM)", "rendered"),
+                ],
+                value="auto",
+                label="Processing mode",
                 info=(
-                    "Override the born-digital heuristic. Use when "
-                    "Docling's output is poor on complex layouts. "
-                    "Will incur Z.ai API costs."
+                    "Auto: plain conversion; vision OCR only for scanned PDFs. "
+                    "Plain: direct conversion, no API cost. Rendered: file → "
+                    "page images → GLM OCR per page — best for complex "
+                    "layouts; slower and costs Z.ai tokens (needs MS Office "
+                    "or LibreOffice)."
                 ),
-                interactive=vlm_available,
             )
 
             with gr.Row():
@@ -231,6 +250,7 @@ def render_convert_tab() -> None:
             with gr.Accordion("Supported formats", open=False):
                 gr.Markdown(_get_service().detector.supported_formats_text)
 
+            gr.Markdown(f"_{engine_note}_")
             gr.Markdown(f"_{vlm_note}_")
 
         with gr.Column(scale=2):
@@ -253,7 +273,7 @@ def render_convert_tab() -> None:
 
     convert_btn.click(
         fn=_convert_document,
-        inputs=[file_input, force_vlm],
+        inputs=[file_input, parse_mode_input],
         outputs=[markdown_preview, status_display, download_btn],
     )
 

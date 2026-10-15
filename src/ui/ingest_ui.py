@@ -14,6 +14,7 @@ import gradio as gr
 
 from src.core import MarkdownConverterService
 from src.core.glm_parser import GLMParser
+from src.core.office_renderer import available_engine
 from src.indexing import IngestionPipeline, IngestionResult
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def _format_result(r: IngestionResult) -> str:
 
 def _ingest_files(
     files,
-    force_vlm_for_pdf: bool,
+    parse_mode: str,
     skip_if_exists: bool,
     progress: gr.Progress = gr.Progress(),
 ) -> tuple[str, str]:
@@ -91,7 +92,7 @@ def _ingest_files(
 
             result = pipeline.ingest(
                 path,
-                force_vlm_for_pdf=force_vlm_for_pdf,
+                parse_mode=parse_mode,
                 skip_if_exists=skip_if_exists,
                 replace_existing=not skip_if_exists,
                 ocr_progress=_on_page,
@@ -158,15 +159,23 @@ def _delete_doc(doc_id: str) -> tuple[str, str]:
 def render_ingest_tab() -> None:
     """Build the Ingest tab."""
     vlm_available = GLMParser.is_configured()
+    engine = available_engine()
+    engine_note = {
+        "com": "Rendered-mode engine: MS Office COM is available.",
+        "soffice": "Rendered-mode engine: LibreOffice found (soffice on PATH).",
+        "none": "Rendered-mode engine: none found — install MS Office or put soffice on PATH to enable it.",
+    }[engine]
 
     gr.Markdown(
         """
         ### Ingest documents into the vector index
 
-        Each file is converted to markdown, chunked by header, and upserted
-        into Qdrant with both dense (OpenAI `text-embedding-3-small`) and
-        sparse (BM25) vectors. Re-ingesting the same file replaces its
-        previous chunks unless **Skip if already indexed** is on.
+        Each file is converted to markdown (per the processing mode), chunked
+        by header, and upserted into Qdrant with both dense
+        (OpenAI `text-embedding-3-small`) and sparse (BM25) vectors.
+        Re-ingesting the same file replaces its previous chunks unless
+        **Skip if already indexed** is on. Rendered mode reuses cached page
+        OCR, so repeated ingestions of unchanged files cost no new API calls.
         """
     )
 
@@ -181,10 +190,21 @@ def render_ingest_tab() -> None:
             )
 
             with gr.Row():
-                force_vlm = gr.Checkbox(
-                    label="Force GLM OCR for PDFs",
-                    value=False,
-                    interactive=vlm_available,
+                parse_mode_input = gr.Radio(
+                    choices=[
+                        ("Auto (default)", "auto"),
+                        ("Plain (MarkItDown)", "plain"),
+                        ("Rendered + LLM (GLM)", "rendered"),
+                    ],
+                    value="auto",
+                    label="Processing mode",
+                    info=(
+                        "Auto: plain conversion; vision OCR only for scanned "
+                        "PDFs. Plain: direct conversion, no API cost. "
+                        "Rendered: file → page images → GLM OCR per page "
+                        "(slower, costs Z.ai tokens; needs MS Office or "
+                        "LibreOffice)."
+                    ),
                 )
                 skip_existing = gr.Checkbox(
                     label="Skip if already indexed",
@@ -200,6 +220,16 @@ def render_ingest_tab() -> None:
 
             status_display = gr.Markdown(
                 value="_Upload files and click 'Ingest into Qdrant' to begin._"
+            )
+
+            gr.Markdown(
+                f"_{engine_note}_ "
+                + (
+                    "GLM-5.3-Flash is configured."
+                    if vlm_available
+                    else "ZAI_API_KEY not set — images, scanned PDFs, and "
+                    "video will fail; add it to .env."
+                )
             )
 
         with gr.Column(scale=1):
@@ -220,7 +250,7 @@ def render_ingest_tab() -> None:
 
     ingest_btn.click(
         fn=_ingest_files,
-        inputs=[file_input, force_vlm, skip_existing],
+        inputs=[file_input, parse_mode_input, skip_existing],
         outputs=[status_display, library_display],
     )
 
