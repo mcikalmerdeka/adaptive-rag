@@ -166,6 +166,36 @@ def test_no_engine_raises_with_options(tmp_path, monkeypatch):
     assert "Option B" in message
 
 
+def test_com_present_but_export_failed_raises_com_guidance(tmp_path, monkeypatch):
+    """Office IS installed (win32com importable) but the export raised (e.g.
+    the file is open in Word / password-protected). The user must not be
+    told to "install MS Office"."""
+    src = _make_office_file(tmp_path, ".docx", b"locked-doc")
+    out_dir = tmp_path / "out"
+
+    class _Docs:
+        def Open(self, *args, **kwargs):
+            raise RuntimeError("file is locked by another process")
+
+    class _WordApp:
+        Documents = _Docs()
+
+        def Quit(self):
+            pass
+
+    fake = types.ModuleType("win32com.client")
+    fake.Dispatch = lambda prog_id: _WordApp()
+    monkeypatch.setitem(sys.modules, "win32com.client", fake)
+    monkeypatch.setattr(ore, "_soffice_export", lambda s, o, timeout=600: False)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        ore.to_pdf(src, out_dir)
+    message = str(excinfo.value)
+    assert "Office COM export failed" in message
+    assert "locked by another process" in message
+    assert "No layout engine" not in message
+
+
 # ---- soffice invocation details ---------------------------------------------
 
 

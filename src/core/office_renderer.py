@@ -28,6 +28,12 @@ CONVERTIBLE_EXTENSIONS = {".docx", ".pptx", ".xlsx"}
 
 SOFFICE_TIMEOUT_SEC = 600
 
+# Reason from the most recent COM export attempt that raised, or None when
+# COM was absent/unused. ``to_pdf`` turns this into a distinct, actionable
+# error ("Office IS installed, the export failed") instead of telling an
+# Office user to install Office.
+_com_failure: str | None = None
+
 
 def _find_soffice() -> str | None:
     """Locate the LibreOffice binary, or None."""
@@ -43,6 +49,8 @@ def _com_export(source: Path, dest: Path) -> bool:
     """
     # Hold the module object itself: attribute access on the parent package
     # breaks when a pre-existing sys.modules child wasn't setattr'd.
+    global _com_failure
+    _com_failure = None
     try:
         client = importlib.import_module("win32com.client")
     except Exception as exc:  # ImportError falls here on non-Windows hosts
@@ -89,9 +97,9 @@ def _com_export(source: Path, dest: Path) -> bool:
             )
         return True
     except Exception as exc:
+        _com_failure = f"{type(exc).__name__}: {exc}"
         logger.warning(
-            f"Office COM export failed for {source.name}: "
-            f"{type(exc).__name__}: {exc}"
+            f"Office COM export failed for {source.name}: {_com_failure}"
         )
         return False
     finally:
@@ -169,6 +177,18 @@ def to_pdf(file_path: str | Path, out_dir: str | Path | None = None) -> Path:
         if soffice_output.exists():
             soffice_output.replace(dest)
             return dest
+
+    if _com_failure:
+        # Office is installed but the export failed (locked file, password,
+        # corrupt doc...). Telling this user to "install MS Office" is wrong.
+        raise RuntimeError(
+            f"Office COM export failed for '{source.name}': {_com_failure}\n"
+            "- Option A: close the file in Office / check document passwords "
+            "/ repair the file, then retry\n"
+            "- Option B: install LibreOffice (soffice on PATH) as the "
+            "fallback engine\n"
+            "- Option C: export the PDF yourself and use plain mode instead"
+        )
 
     raise RuntimeError(
         f"No layout engine available to render '{source.name}' to PDF.\n"
