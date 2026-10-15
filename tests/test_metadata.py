@@ -87,13 +87,13 @@ class TestBuildChunkMetadata:
         meta = build_chunk_metadata(
             doc_id="deadbeef",
             source_path=f,
-            parser="docling",
+            parser="markitdown",
         )
         assert meta["doc_id"] == "deadbeef"
         assert meta["source"] == str(f.absolute())
         assert meta["filename"] == "policy.pdf"
         assert meta["extension"] == ".pdf"
-        assert meta["parser"] == "docling"
+        assert meta["parser"] == "markitdown"
         assert meta["pages"] is None
         assert "ingested_at" in meta
 

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    logger.info("Warming up document converter (Docling models may download on first run)...")
+    logger.info("Initializing document converter...")
     MarkdownConverterService()
     logger.info("Converter ready.")
 
