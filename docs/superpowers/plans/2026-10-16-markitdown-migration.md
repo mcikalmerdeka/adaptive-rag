@@ -215,19 +215,19 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 - Consumes: `MarkdownConverterService.convert_detailed(..., parse_mode=...)` (Task 5); `IngestionPipeline.ingest(..., parse_mode=...)` (Task 6); `from src.core.office_renderer import available_engine` (Task 3); `GLMParser.is_configured()`.
 - Produces: Gradio callbacks wired exactly as before (`file_input.change`, button clicks) with `gr.Radio(choices=["auto", "plain", "rendered"], value="auto", label="Processing mode")` replacing both checkboxes.
 
-- [ ] **Step 1: Modify `markdown_converter_ui.py`**
+- [x] **Step 1: Modify `markdown_converter_ui.py`**
   - Replace the `force_vlm` Checkbox with a three-way `gr.Radio` using (label, value) tuple choices exactly: `("Auto (default)", "auto")`, `("Plain (MarkItDown)", "plain")`, `("Rendered + LLM (GLM)", "rendered")`, label `"Processing mode"`, `info=` text summarizing: auto=plain conversion, vision OCR only for scanned PDFs; plain=direct conversion, no API cost; rendered=page images → GLM OCR (slower, costs Z.ai tokens; needs MS Office or LibreOffice).
   - Explainer markdown: MarkItDown for `.pdf`/`.docx`/`.pptx`/`.xlsx`/`.html`/`.csv`; GLM-5.3-Flash for images, scanned PDFs, videos; passthrough `.md`/`.txt`; plus the honesty note "Images and videos always use GLM — they have no plain path."
   - Engine-status line under the accordion: `f"_Rendered-mode engine: {available_engine()} — ..."`.
   - `_convert_document(file_info, parse_mode, progress)` signature + forward.
-- [ ] **Step 2: Modify `ingest_ui.py`** identically (radio in place of `force_vlm`; `pipeline.ingest(..., parse_mode=...)`).
-- [ ] **Step 3: Footer** — swap the Docling link/brand for MarkItDown (keep GLM link).
-- [ ] **Step 4: Verify import smoke**
+- [x] **Step 2: Modify `ingest_ui.py`** identically (radio in place of `force_vlm`; `pipeline.ingest(..., parse_mode=...)`).
+- [x] **Step 3: Footer** — swap the Docling link/brand for MarkItDown (keep GLM link).
+- [x] **Step 4: Verify import smoke**
   ```powershell
   .venv\Scripts\python.exe -c "import src.ui.main_ui, src.ui.ingest_ui, src.ui.markdown_converter_ui; print('ui ok')"
   ```
   Expected: `ui ok` (browser rendering stays manual for the owner).
-- [ ] **Step 5: Commit** `feat: expose auto/plain/rendered processing mode in Convert and Ingest tabs`
+- [x] **Step 5: Commit** `feat: expose auto/plain/rendered processing mode in Convert and Ingest tabs`
 
 ---
 
