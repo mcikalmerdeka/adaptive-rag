@@ -67,20 +67,20 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 - Consumes: `markitdown.MarkItDown`, exceptions `FileConversionException` / `MissingDependencyException`, result type `DocumentConverterResult` (all importable from `markitdown` top-level — verified in `.venv`).
 - Produces: `MarkItDownParserError(Exception)` and `MarkItDownParser.parse(self, file_path: str | Path) -> str` (used by Task 4's router and Task 5's converter).
 
-- [ ] **Step 1: Write the failing tests in `tests/test_markitdown_parser.py`**
+- [x] **Step 1: Write the failing tests in `tests/test_markitdown_parser.py`**
   - `test_csv_converts_offline` — write `name,qty\nwidget,3\n` to a tmp `.csv`; `md = MarkItDownParser().parse(p)`; assert `"widget" in md` and `"|" in md`, and `isinstance(md, str)`.
   - `test_missing_file_raises_filenotfound` — nonexistent path → `pytest.raises(FileNotFoundError)`.
   - `test_conversion_exception_wrapped` — monkeypatch the parser's `_converter.convert` to raise `FileConversionException("boom")`; `pytest.raises(MarkItDownParserError, match="boom")`.
   - `test_missing_dependency_wrapped` — same, raising `MissingDependencyException("gone")`; expect `MarkItDownParserError, match="gone"`.
   - `test_empty_output_returns_empty_string_and_logs` — monkeypatch `convert` to return `DocumentConverterResult(markdown="")`; result `== ""`; `caplog` contains a warning.
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
   `​.venv\Scripts\python.exe -m pytest tests/test_markitdown_parser.py -v` → FAIL (module does not exist).
-- [ ] **Step 3: Implement `src/core/markitdown_parser.py`**
+- [x] **Step 3: Implement `src/core/markitdown_parser.py`** *(executed per Task 2 ledger ruling: additionally folded the import-chain decoupling — core/__init__.py exports, converter error import/tuple, interim router rewiring, docling_parser.py deletion, preloader docling-block removal — into this task's commit)*
   - Module docstring: one instance, no LLM kwargs, no `warm_up()` (model-free) — follows the wrapper pattern of the deleted DoclingParser.
   - `__init__` stores `self._converter = MarkItDown(enable_plugins=False)` and logs init.
   - `parse`: existence check first (raise `FileNotFoundError`); wrap the `convert()` call — catch `(FileConversionException, MissingDependencyException, Exception)` → raise `MarkItDownParserError(f"MarkItDown failed on {path.name}: {exc}")`; empty markdown → `logger.warning(...)` + `return ""`; else INFO log chars and return.
-- [ ] **Step 4: Run tests to verify they pass** (all 5 PASS)
-- [ ] **Step 5: Commit** `feat: add MarkItDownParser wrapper for plain document conversion`
+- [x] **Step 4: Run tests to verify they pass** (all 5 PASS)
+- [x] **Step 5: Commit** `feat: add MarkItDownParser wrapper for plain document conversion`
 
 ---
 
