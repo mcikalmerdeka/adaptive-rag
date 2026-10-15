@@ -175,17 +175,17 @@ Failure modes the spec implies that no single task's tests fully exercise; each 
 - Consumes: `validate_parse_mode` (Task 4), `MarkItDownParserError` (Task 2), everything else unchanged.
 - Produces: `MarkdownConverterService.convert(file_path, parse_mode="auto", progress=None) -> str`; `convert_detailed(file_path, parse_mode="auto", progress=None) -> ConversionOutput`; `convert_and_save(file_path, output_path=None, parse_mode="auto") -> Path`; `IngestionPipeline.ingest(..., parse_mode)` (Task 6). `ConversionOutput` shape unchanged.
 
-- [ ] **Step 1: Write `tests/test_converter.py`**
+- [x] **Step 1: Write `tests/test_converter.py`**
   - `test_bad_parse_mode_raises_eagerly` — `pytest.raises(ValueError, match="parse_mode")` on `convert_detailed(path, parse_mode="turbo")`; no conversion runs.
   - `test_csv_end_to_end` — real tmp CSV through `convert_detailed`: markdown contains `"|"`, `parser == "markitdown"`, `pages is None`, file_info format `csv`.
-- [ ] **Step 2: Run to verify FAIL** (arg missing; and import of `src.core` still broken at this point — the fix lands together)
-- [ ] **Step 3: Implement**
+- [x] **Step 2: Run to verify FAIL** (arg missing; and import of `src.core` still broken at this point — the fix lands together) *(actual red: `TypeError: unexpected keyword parse_mode` — the import chain was already green via Task 2's ruling)*
+- [x] **Step 3: Implement** *(core/__init__ swap, docling_parser deletion, preloader block were already landed by Task 2's ruled decoupling; converter threading + metadata/app.py swaps done here)*
   - converter: `from .parser_router import validate_parse_mode`; `from .markitdown_parser import MarkItDownParserError`; every public conversion method validates `parse_mode` first, then threads it to `_router.parse(info, parse_mode=... , progress=...)`; except tuple `(MarkItDownParserError, GLMParserError)`; generic handler stays.
   - `src/core/__init__.py`: swap docling imports/exports for the MarkItDown pair.
   - Delete `src/core/docling_parser.py`, and in the same edit remove the Docling block from `scripts/preload_models.py` (it imports the deleted module; keep its FlashRank + FastEmbed parts).
   - metadata docstring + test example swaps; app.py log text.
-- [ ] **Step 4: Run the FULL suite** `.venv\Scripts\python.exe -m pytest tests/ -v` → **all green** (first full-green gate).
-- [ ] **Step 5: Commit** `refactor: replace docling_parser with markitdown converter plumbing`
+- [x] **Step 4: Run the FULL suite** `.venv\Scripts\python.exe -m pytest tests/ -v` → **all green** (239/239)
+- [x] **Step 5: Commit** `refactor: thread parse_mode through converter service; markitdown provenance`
 
 ---
 
