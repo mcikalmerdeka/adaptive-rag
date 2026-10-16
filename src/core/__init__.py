@@ -5,21 +5,21 @@ from .converter import (
     DocumentConverterError,
     MarkdownConverterService,
 )
-from .docling_parser import DoclingParser, DoclingParserError
 from .file_detector import DocumentFormat, FileTypeDetector, FileTypeInfo
 from .glm_parser import GLMParser, GLMParserError
+from .markitdown_parser import MarkItDownParser, MarkItDownParserError
 from .parser_router import ParserRouter, ParseResult
 
 __all__ = [
     "ConversionOutput",
     "DocumentConverterError",
     "DocumentFormat",
-    "DoclingParser",
-    "DoclingParserError",
     "FileTypeDetector",
     "FileTypeInfo",
     "GLMParser",
     "GLMParserError",
+    "MarkItDownParser",
+    "MarkItDownParserError",
     "MarkdownConverterService",
     "ParserRouter",
     "ParseResult",

@@ -40,7 +40,7 @@ def build_app() -> gr.Blocks:
         gr.Markdown(
             """
             ---
-            Powered by [Docling](https://github.com/docling-project/docling),
+            Powered by [MarkItDown](https://github.com/microsoft/markitdown),
             [GLM-5.3-Flash](https://docs.z.ai/guides/vlm/glm-5.3-flash),
             [Qdrant](https://qdrant.tech/) and
             [LangChain](https://python.langchain.com/) ·

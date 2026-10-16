@@ -33,9 +33,9 @@ See:
   |---|---|---|
   | `.md`, `.txt` | passthrough | already markdown / plain text |
   | `.png`, `.jpg`, `.webp`, `.mp4`, `.mov`, `.mkv` | GLM-5.3-Flash | vision + video understanding beats local OCR |
-  | `.pdf` (born-digital) | Docling | fast, free, lossless |
-  | `.pdf` (scanned) | GLM-5.3-Flash per page | better than EasyOCR on layouts |
-  | `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv` | Docling | native structural parsing |
+  | `.pdf` (born-digital) | MarkItDown | fast, free, lossless text-layer extraction |
+  | `.pdf` (scanned) | GLM-5.3-Flash per page | vision OCR beats text-layer on image pages |
+  | `.docx`, `.pptx`, `.xlsx`, `.html`, `.csv` | MarkItDown | native structural parsing |
 
 - **Video ingestion:** `.mp4`/`.mov`/`.mkv` (≤ GLM_VIDEO_MAX_UPLOAD_MB, base64 data URL) are analyzed by GLM-5.3-Flash into timestamped markdown (`## [mm:ss]` sections), so chat retrieval answers "what happens around minute 2?" with citations.
 - **Born-digital vs scanned heuristic:** PDFs with <150 chars of extractable text in the first 3 pages route to GLM.
@@ -57,7 +57,7 @@ See:
     "header_path":  "Refund Policy > Eligibility",
     "chunk_index":  7,
     "total_chunks": 23,
-    "parser":       "docling",
+    "parser":       "markitdown",
     "pages":        24,
     "ingested_at":  "2026-05-06T03:50:00+00:00",
   }
@@ -128,9 +128,10 @@ adaptive-rag/
     │   └── settings.py             # reads .env once, exposes immutable Settings
     ├── core/                       # Document → markdown
     │   ├── file_detector.py
-    │   ├── docling_parser.py
+    │   ├── markitdown_parser.py      MarkItDown plain conversions (PDF/office/html/csv)
+    │   ├── office_renderer.py        Office COM / LibreOffice → PDF for rendered mode
     │   ├── glm_parser.py             GLM-5.3-Flash OCR + video via Z.ai
-    │   ├── parser_router.py
+    │   ├── parser_router.py          auto/plain/rendered mode dispatch
     │   └── converter.py
     ├── chunking/                   # Markdown → header-aware chunks
     │   ├── markdown_chunker.py
@@ -198,7 +199,7 @@ uv run app.py
 
 Open `http://localhost:7860`.
 
-> First run downloads Docling (~1-2 GB), the FastEmbed BM25 tokenizer (~few MB), and (on first chat turn) the FlashRank reranker (~34 MB).
+> First run downloads the FastEmbed BM25 tokenizer (~few MB) and (on first chat turn) the FlashRank reranker (~34 MB). MarkItDown downloads nothing.
 >
 > The bundled Postgres binds to **host port 5433** (not 5432) to avoid colliding with a host-installed Postgres. If you want to use Neon / RDS / your own Postgres, just point `SQL_DATABASE_URL` at it (the connection only needs `SELECT` rights on the target tables). Leave `SQL_DATABASE_URL` unset to disable the SQL strategies entirely — the router will never pick them in that case.
 
@@ -256,8 +257,8 @@ uv run python -m src.observability.cost_tracker --days 7
 
 ## Roadmap
 
-- ✅ Phase 1: Docling baseline document conversion
-- ✅ Phase 2: Parser router (Docling + GLM-5.3-Flash fallback) with caching + video ingestion
+- ✅ Phase 1: Baseline document conversion (v1 parser, superseded by MarkItDown)
+- ✅ Phase 2: Parser router (plain MarkItDown + GLM-5.3-Flash rendered/OCR) with caching + video ingestion
 - ✅ Phase 3: Header-aware chunking + hybrid (dense + BM25) Qdrant indexing
 - ✅ Phase 4: Hybrid retrieval + FlashRank reranker + grounded chat with citations
 - ✅ Phase 5: Adaptive query router + read-only SQL tool over a demo Postgres warehouse
