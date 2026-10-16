@@ -1,0 +1,54 @@
+name: Deploy to Hugging Face Space
+
+# Deploys by pushing main's full git history to the Space's git endpoint.
+#
+# Why a plain push instead of a hub-sync mirror or an orphan commit?
+# - hf/main is an ancestor of GitHub main, so pushes stay a clean
+#   fast-forward, and history contains no raw binaries beyond a 641 KB PNG
+#   (docs/ARCHITECTURE.png, already on the Space) that HF's pre-receive
+#   hook already accepted. Nothing to strip, so no orphan commit is needed.
+# - 1 push = 1 commit on HF; the delete-then-reupload alternate pattern can
+#   burn ~1 commit per file and trip the commits/hour rate limit
+# - --force fully reconciles the Space (adds, updates, AND deletes files),
+#   so a failed run can never leave a half-emptied Space behind
+# - Deploy scope = `git ls-files`; secrets for the app runtime come from
+#   HF Space settings, not this repo
+# - No LFS files exist today, but checkout uses lfs: true so a file later
+#   LFS-tracked via .gitattributes uploads as Xet/LFS automatically
+# If HF ever rejects the push over history content, fall back to the
+# orphan-commit pattern in the local (gitignored) examples folder
+# github_hf_spaces_deployment/deploy.yml
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # manual re-run after a failed deploy / rate-limit recovery
+
+concurrency:
+  group: deploy-to-hf
+  cancel-in-progress: true
+
+jobs:
+  deploy-to-hf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: HF's hook scans every pushed commit
+          lfs: true
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SPACE_REPO: mcikalmerdeka/adaptive-rag
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::HF_TOKEN secret is not set (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          git lfs install
+          git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/${SPACE_REPO}"
+          # HEAD:main lets manual recovery runs from any branch land on main
+          git push --force space HEAD:main
+          echo "Deployed to https://huggingface.co/spaces/${SPACE_REPO}"
