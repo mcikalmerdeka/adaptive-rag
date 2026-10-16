@@ -32,13 +32,26 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Install only runtime system deps (no build tools)
+# Install only runtime system deps (no build tools). The headless LibreOffice
+# -nogui trio + fonts back the Rendered processing mode in containers: office
+# documents are exported to PDF via `soffice --headless --convert-to pdf`
+# (src/core/office_renderer.py auto-detects it as the fallback engine).
+# Carlito/Caladea are the metric-compatible substitutes for Calibri/Cambria,
+# so Word/Excel/PowerPoint layouts paginate the same way as a real Office
+# install — page breaks matter because rendered mode OCRs page by page.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender1 \
+    fonts-liberation \
+    fonts-dejavu-core \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
+    libreoffice-writer-nogui \
+    libreoffice-calc-nogui \
+    libreoffice-impress-nogui \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder
