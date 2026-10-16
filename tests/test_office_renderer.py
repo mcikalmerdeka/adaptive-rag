@@ -275,6 +275,73 @@ def test_format_codes_per_app(tmp_path, monkeypatch, ext, expected_fmt):
         assert opens and opens[0][1] == (str(src.resolve()), 0, True)
 
 
+# ---- COM apartment lifecycle -------------------------------------------------
+
+
+def test_com_export_initializes_and_uninitializes_com(tmp_path, monkeypatch):
+    """Gradio runs handlers on worker threads that never initialized COM —
+    _com_export must CoInitialize (and CoUninitialize) around the export."""
+    src = _make_office_file(tmp_path, ".docx", b"payload")
+    calls: list = []
+    monkeypatch.setitem(sys.modules, "win32com.client", _fake_com_module(calls))
+
+    fake_pythoncom = types.ModuleType("pythoncom")
+
+    class _ComError(Exception):
+        pass
+
+    fake_pythoncom.com_error = _ComError
+    fake_pythoncom.CoInitialize = lambda: calls.append(("CoInitialize", (), {}))
+    fake_pythoncom.CoUninitialize = lambda: calls.append(
+        ("CoUninitialize", (), {})
+    )
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+
+    ok = ore._com_export(src, tmp_path / "out.pdf")
+    assert ok is True
+
+    order = [c[0] for c in calls]
+    assert "CoInitialize" in order and "CoUninitialize" in order
+    assert order.index("CoInitialize") < order.index("Dispatch")
+    assert order.index("CoUninitialize") > order.index("Quit")
+    assert order.count("CoInitialize") == 1
+    assert order.count("CoUninitialize") == 1
+
+
+def test_com_export_skips_uninitialize_when_apartment_conflict(
+    tmp_path, monkeypatch
+):
+    """A thread already in a different COM apartment raises com_error
+    (RPC_E_CHANGED_MODE) on CoInitialize; COM is then usable as-is and must
+    NOT be uninitialized by us (we never successfully Initialize'd it)."""
+    src = _make_office_file(tmp_path, ".pptx", b"deck")
+    calls: list = []
+    monkeypatch.setitem(sys.modules, "win32com.client", _fake_com_module(calls))
+
+    fake_pythoncom = types.ModuleType("pythoncom")
+
+    class _ComError(Exception):
+        pass
+
+    def _init_raises():
+        calls.append(("CoInitializeErr", (), {}))
+        raise _ComError(-2147221015, "RPC_E_CHANGED_MODE", None, None)
+
+    fake_pythoncom.com_error = _ComError
+    fake_pythoncom.CoInitialize = _init_raises
+    fake_pythoncom.CoUninitialize = lambda: calls.append(
+        ("CoUninitialize", (), {})
+    )
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+
+    ok = ore._com_export(src, tmp_path / "out.pdf")
+    assert ok is True
+
+    order = [c[0] for c in calls]
+    assert "CoInitializeErr" in order
+    assert "CoUninitialize" not in order
+
+
 # ---- capability reporting -----------------------------------------------------
 
 

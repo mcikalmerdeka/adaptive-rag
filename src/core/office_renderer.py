@@ -53,6 +53,7 @@ def _com_export(source: Path, dest: Path) -> bool:
     _com_failure = None
     try:
         client = importlib.import_module("win32com.client")
+        pythoncom = importlib.import_module("pythoncom")
     except Exception as exc:  # ImportError falls here on non-Windows hosts
         logger.info(f"Office COM unavailable ({type(exc).__name__}): {exc}")
         return False
@@ -63,6 +64,20 @@ def _com_export(source: Path, dest: Path) -> bool:
             "unavailable"
         )
         return False
+
+    # COM is thread-local: join this thread into an STA apartment (worker
+    # threads like Gradio's handlers never do this themselves), balance it
+    # with CoUninitialize, and tolerate a thread already in another
+    # apartment (RPC_E_CHANGED_MODE) where COM is usable as-is.
+    try:
+        pythoncom.CoInitialize()
+        com_initialized = True
+    except pythoncom.com_error as exc:
+        logger.info(
+            f"CoInitialize skipped ({type(exc).__name__}: {exc}); using the "
+            f"thread's existing COM apartment"
+        )
+        com_initialized = False
 
     resolved_src = source.resolve()
     resolved_dest = dest.resolve()
@@ -105,6 +120,8 @@ def _com_export(source: Path, dest: Path) -> bool:
     finally:
         if app is not None:
             app.Quit()
+        if com_initialized:
+            pythoncom.CoUninitialize()
 
 
 def _soffice_export(
