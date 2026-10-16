@@ -31,6 +31,7 @@ assets/
 other/
 inspiration/
 example/
+data/
 
 # AXIOM
 .agents/skills/developing-with-streamlit/
