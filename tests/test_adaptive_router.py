@@ -8,6 +8,8 @@ import pytest
 
 import src.routing.adaptive_router as router_module
 from src.routing.adaptive_router import AdaptiveRouter
+from src.routing.dispatcher import AdaptiveDispatcher
+from src.tools.sql_tool import SqlTool
 
 
 def _fake_settings(**overrides: object) -> SimpleNamespace:
@@ -76,3 +78,18 @@ class TestRouterModelWiring:
             router_reasoning={"effort": "high"},
         )
         assert router._llm.temperature is None
+
+
+class TestDispatcherSqlAccessor:
+    """``AdaptiveDispatcher.sql`` hands the Admin UI the lazy-built tool."""
+
+    def test_sql_none_when_disabled(self) -> None:
+        dispatcher = AdaptiveDispatcher(sql_tool=False)
+        assert dispatcher.sql is None
+
+    def test_sql_returns_injected_tool(self) -> None:
+        # ``sql_tool`` overrides must be real SqlTool instances (isinstance
+        # check in __init__), so build one without running __init__.
+        tool = SqlTool.__new__(SqlTool)
+        dispatcher = AdaptiveDispatcher(sql_tool=tool)
+        assert dispatcher.sql is tool

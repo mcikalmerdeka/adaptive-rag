@@ -77,6 +77,46 @@ def _format_daily(summary: CostSummary) -> str:
     return "\n".join(lines)
 
 
+def _format_schema(sql_tool: object | None) -> str:
+    """Render the SQL schema browser markdown.
+
+    Takes the dispatcher's ``SqlTool`` (or ``None`` when SQL isn't
+    configured) and introspects live — the tool returns an ``{"error": ...}``
+    dict instead of raising when the database can't be reached.
+    """
+    if sql_tool is None:
+        return (
+            "### SQL database not configured\n\n"
+            "Set `SQL_DATABASE_URL` in your environment (a read-only "
+            "connection string) and restart the app to browse its schema."
+        )
+    try:
+        schema = sql_tool.describe_schema()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Schema introspection failed")
+        return f"### Failed to read schema\n\n```\n{exc}\n```"
+
+    if "error" in schema:
+        return f"### Failed to read schema\n\n```\n{schema['error']}\n```"
+
+    db_name = schema.get("database") or "(unknown)"
+    tables = schema.get("tables") or []
+    if not tables:
+        return f"### Database: `{db_name}`\n\n_No tables found in the `public` schema._"
+
+    lines: list[str] = [f"### Database: `{db_name}`", ""]
+    for table in tables:
+        lines.append(f"**{table['name']}**")
+        lines.append("")
+        lines.append("| Column | Type | Nullable |")
+        lines.append("|--------|------|----------|")
+        for col in table["columns"]:
+            nullable = "YES" if col["nullable"] else "NO"
+            lines.append(f"| `{col['name']}` | {col['type']} | {nullable} |")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _refresh(window_days: int) -> tuple[str, str, str]:
     try:
         summary = fetch_cost_summary(days=int(window_days))
@@ -139,3 +179,23 @@ def render_admin_tab() -> None:
         inputs=[window],
         outputs=[summary_md, by_model_md, by_day_md],
     )
+
+    # ---- SQL database browser -----------------------------------------
+    gr.Markdown(
+        """
+        ## SQL database
+
+        Tables and columns of the connected database — the same schema the
+        `sql_only` / `hybrid` strategies query. Read-only introspection,
+        nothing is cached.
+        """
+    )
+    schema_refresh_btn = gr.Button("Refresh schema", variant="primary")
+    schema_md = gr.Markdown(value="_Click **Refresh schema** to inspect the database._")
+
+    def _refresh_schema() -> str:
+        from src.ui.chat_ui import _get_dispatcher
+
+        return _format_schema(_get_dispatcher().sql)
+
+    schema_refresh_btn.click(fn=_refresh_schema, outputs=[schema_md])

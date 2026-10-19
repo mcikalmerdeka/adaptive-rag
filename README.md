@@ -239,7 +239,7 @@ Open `http://localhost:7860`.
 
 **Convert tab** — single-document preview; pick a file, optionally force GLM for PDFs, see the markdown and download.
 
-**Admin tab** — token + USD cost rollups pulled from Langfuse. Disabled-state instructions when `LANGFUSE_*` keys are missing.
+**Admin tab** — token + USD cost rollups pulled from Langfuse. Disabled-state instructions when `LANGFUSE_*` keys are missing. Also shows the connected SQL database's schema (tables + columns, read-only introspection) under **SQL database**, with a **Refresh schema** button; disabled-state hint when `SQL_DATABASE_URL` isn't set.
 
 ## Evaluation
 

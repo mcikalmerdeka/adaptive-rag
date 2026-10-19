@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.tools.sql_tool import (
     _FORBIDDEN_KEYWORDS,
@@ -255,3 +256,82 @@ class TestRegexPatterns:
 
     def test_forbidden_case_insensitive(self) -> None:
         assert _FORBIDDEN_KEYWORDS.search("insert into t") is not None
+
+
+# ---------------------------------------------------------------------------
+# describe_schema — structured introspection for the Admin UI
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeSchema:
+    """``describe_schema`` returns structured tables/columns for the UI.
+
+    The tool is built via ``__new__`` (no engine, no LLM) and ``inspect``
+    is patched, so no real database connection is involved.
+    """
+
+    def _tool(self, engine: MagicMock) -> SqlTool:
+        tool = SqlTool.__new__(SqlTool)
+        tool.database_url = "postgresql+psycopg://user:****@host/db"
+        tool._engine = engine
+        return tool
+
+    def _engine_reporting(self, db_name: str) -> MagicMock:
+        conn = MagicMock()
+        conn.execute.return_value.scalar.return_value = db_name
+        engine = MagicMock()
+        engine.connect.return_value.__enter__.return_value = conn
+        return engine
+
+    def test_returns_database_and_sorted_tables(self) -> None:
+        inspector = MagicMock()
+        inspector.get_table_names.return_value = ["products", "orders"]
+        inspector.get_columns.side_effect = lambda t, schema: (
+            [
+                {"name": "id", "type": "INTEGER", "nullable": False},
+                {"name": "title", "type": "VARCHAR(100)", "nullable": True},
+            ]
+            if t == "orders"
+            else [{"name": "sku", "type": "TEXT", "nullable": True}]
+        )
+
+        tool = self._tool(self._engine_reporting("neondb"))
+        with patch("src.tools.sql_tool.inspect", return_value=inspector):
+            result = tool.describe_schema()
+
+        assert result == {
+            "database": "neondb",
+            "tables": [
+                {
+                    "name": "orders",
+                    "columns": [
+                        {"name": "id", "type": "INTEGER", "nullable": False},
+                        {"name": "title", "type": "VARCHAR(100)", "nullable": True},
+                    ],
+                },
+                {
+                    "name": "products",
+                    "columns": [{"name": "sku", "type": "TEXT", "nullable": True}],
+                },
+            ],
+        }
+
+    def test_returns_empty_tables_when_schema_is_empty(self) -> None:
+        inspector = MagicMock()
+        inspector.get_table_names.return_value = []
+
+        tool = self._tool(self._engine_reporting("neondb"))
+        with patch("src.tools.sql_tool.inspect", return_value=inspector):
+            result = tool.describe_schema()
+
+        assert result == {"database": "neondb", "tables": []}
+
+    def test_error_path_returns_error_key(self) -> None:
+        tool = self._tool(MagicMock())
+        with patch(
+            "src.tools.sql_tool.inspect", side_effect=SQLAlchemyError("boom")
+        ):
+            result = tool.describe_schema()
+
+        assert "error" in result
+        assert "boom" in result["error"]

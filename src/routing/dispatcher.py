@@ -206,6 +206,11 @@ class AdaptiveDispatcher:
         return self._get_sql_tool() is not None
 
     @property
+    def sql(self) -> SqlTool | None:
+        """The lazily-built SQL tool, or ``None`` when unavailable."""
+        return self._get_sql_tool()
+
+    @property
     def schema_summary(self) -> str:
         tool = self._get_sql_tool()
         return tool.schema_summary() if tool is not None else ""

@@ -188,6 +188,37 @@ class SqlTool:
             logger.warning(f"Schema summary failed: {exc}")
             return "(schema introspection failed)"
 
+    def describe_schema(self) -> dict:
+        """Structured introspection of the connected DB for the Admin UI.
+
+        Returns ``{"database": <name>, "tables": [{name, columns: [{name,
+        type, nullable}]}]}`` for the ``public`` schema, or
+        ``{"error": <message>}`` when the database can't be reached.
+        Read-only, uncached — cheap enough to run on a button click.
+        """
+        try:
+            inspector = inspect(self._engine)
+            table_names = sorted(inspector.get_table_names(schema="public"))
+            with self._engine.connect() as conn:
+                db_name = conn.execute(text("SELECT current_database()")).scalar()
+            tables = [
+                {
+                    "name": table,
+                    "columns": [
+                        {
+                            "name": c["name"],
+                            "type": str(c["type"]),
+                            "nullable": bool(c.get("nullable", True)),
+                        }
+                        for c in inspector.get_columns(table, schema="public")
+                    ],
+                }
+                for table in table_names
+            ]
+            return {"database": db_name or "", "tables": tables}
+        except SQLAlchemyError as exc:
+            logger.warning(f"Schema description failed: {exc}")
+            return {"error": str(exc)}
     def answer(self, intent: str) -> SqlResult:
         """End-to-end: NL intent -> SQL -> rows."""
         sql = self.translate(intent)
