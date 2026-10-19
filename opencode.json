@@ -2,63 +2,50 @@
   "$schema": "https://opencode.ai/config.json",
   "plugin": ["superpowers@git+https://github.com/obra/superpowers.git"],
   "mcp": {
-    "gradio": {
-      "type": "remote",
-      "url": "https://gradio-docs-mcp.hf.space/gradio_api/mcp/",
-      "enabled": true,
-      "headers": {}
-    },
-    "apify": {
-      "type": "remote",
-      "url": "https://mcp.apify.com/?tools=docs",
-      "enabled": true,
-      "headers": {}
-    },
-    "Agno": {
-      "type": "remote",
-      "url": "https://docs.agno.com/mcp",
-      "enabled": true,
-      "headers": {}
-    },
-    "Docs by LangChain": {
-      "type": "remote",
-      "url": "https://docs.langchain.com/mcp",
-      "enabled": true,
-      "headers": {}
-    },
-    "langfuse-docs": {
-      "type": "remote",
-      "url": "https://langfuse.com/api/mcp",
-      "enabled": true,
-      "headers": {}
-    },
-    "n8n-mcp": {
-      "type": "remote",
-      "url": "http://localhost:5678/mcp-server/http",
-      "enabled": true,
-      "headers": {
-        "Authorization": "Bearer {env:N8N_MCP_TOKEN}"
+    "servers": {
+      "gradio": {
+        "type": "remote",
+        "url": "https://gradio-docs-mcp.hf.space/gradio_api/mcp/"
       },
-      "oauth": false
-    },
-    "exa": {
-      "type": "remote",
-      "url": "https://mcp.exa.ai/mcp",
-      "enabled": true,
-      "headers": {}
-    },
-    "Neon": {
-      "type": "remote",
-      "url": "https://mcp.neon.tech/mcp",
-      "enabled": true,
-      "headers": {
-        "Authorization": "Bearer {env:NEON_API_KEY}"
+      "apify": {
+        "type": "remote",
+        "url": "https://mcp.apify.com/?tools=docs"
+      },
+      "Agno": {
+        "type": "remote",
+        "url": "https://docs.agno.com/mcp"
+      },
+      "Docs by LangChain": {
+        "type": "remote",
+        "url": "https://docs.langchain.com/mcp"
+      },
+      "langfuse-docs": {
+        "type": "remote",
+        "url": "https://langfuse.com/api/mcp"
+      },
+      "n8n-mcp": {
+        "type": "remote",
+        "url": "http://localhost:5678/mcp-server/http",
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer {env:N8N_MCP_TOKEN}"
+        }
+      },
+      "exa": {
+        "type": "remote",
+        "url": "https://mcp.exa.ai/mcp"
+      },
+      "Neon": {
+        "type": "remote",
+        "url": "https://mcp.neon.tech/mcp",
+        "headers": {
+          "Authorization": "Bearer {env:NEON_API_KEY}"
+        }
+      },
+      "eraser": {
+        "type": "remote",
+        "url": "https://app.eraser.io/api/mcp"
       }
-    },
-    "eraser": {
-      "type": "remote",
-      "url": "https://app.eraser.io/api/mcp",
-      "enabled": true
     }
   }
 }
