@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 
+# Request timeout for remote (Docker/Cloud) connections, in seconds.
+# qdrant-client defaults to 5s, which large batch upserts can exceed over
+# a WAN link to Qdrant Cloud — spurious "timed out" failures mid-ingest.
+REMOTE_TIMEOUT_SEC = 60
+
 
 class QdrantStoreError(Exception):
     """Raised on Qdrant connection / setup / upsert failures."""
@@ -242,7 +247,9 @@ class QdrantStore:
         try:
             if url:
                 self._backend_label = f"remote:{url}"
-                return QdrantClient(url=url, api_key=api_key)
+                return QdrantClient(
+                    url=url, api_key=api_key, timeout=REMOTE_TIMEOUT_SEC
+                )
             self._backend_label = f"embedded:{path}"
             Path(path).mkdir(parents=True, exist_ok=True)
             return QdrantClient(path=str(path))

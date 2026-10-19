@@ -182,7 +182,10 @@ uv sync
 cp .env.example .env
 # edit .env and set OPENAI_API_KEY and ZAI_API_KEY
 
-# 3. (Optional) Start Qdrant in Docker — only if you don't want embedded mode
+# 3. Point Qdrant at a backend — Qdrant Cloud (persistent, recommended)
+#    or Docker; embedded mode (unset QDRANT_URL) also works but is ephemeral.
+#    Cloud: in .env set QDRANT_URL to the cluster endpoint and QDRANT_API_KEY
+#    to its key (https://cloud.qdrant.io -> cluster -> API keys).
 docker compose up -d qdrant
 # then in .env: QDRANT_URL=http://localhost:6333
 
