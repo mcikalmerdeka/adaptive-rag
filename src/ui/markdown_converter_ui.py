@@ -1,7 +1,7 @@
-"""Convert tab: upload a single document, preview the markdown, download it.
+"""Convert page: upload a single document, preview the markdown, download it.
 
 This module renders Gradio components inside an existing parent context
-(typically a ``gr.Tab``). Use ``render_convert_tab()`` from ``main_ui``.
+(a page ``gr.Column``). Use ``render_convert_page()`` from ``main_ui``.
 """
 
 from __future__ import annotations
@@ -160,8 +160,8 @@ def _clear_all():
     )
 
 
-def render_convert_tab() -> None:
-    """Build the Convert tab. Call inside ``with gr.Tab(...):``."""
+def render_convert_page() -> None:
+    """Build the Convert page. Call inside a page ``gr.Column``."""
     vlm_available = GLMParser.is_configured()
     vlm_note = (
         "GLM-5.3-Flash is configured. Images, scanned PDFs, and videos "

@@ -1,4 +1,4 @@
-"""Ingest tab: upload → convert → chunk → index in Qdrant.
+"""Ingest page: upload → convert → chunk → index in Qdrant.
 
 The Qdrant store is built lazily on first ingestion to avoid paying its
 init cost (model download, file lock) when the user only wants to use the
@@ -156,8 +156,8 @@ def _delete_doc(doc_id: str) -> tuple[str, str]:
     return f"Deleted **{n}** chunks for doc_id `{doc_id}`.", _library_table_md()
 
 
-def render_ingest_tab() -> None:
-    """Build the Ingest tab."""
+def render_ingest_page() -> None:
+    """Build the Ingest page."""
     vlm_available = GLMParser.is_configured()
     engine = available_engine()
     engine_note = {

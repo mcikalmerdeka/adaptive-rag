@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from src.core.converter import MarkdownConverterService
-from src.ui import build_app
+from src.ui import NAV_CSS, build_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +29,7 @@ def main() -> None:
         server_port=7860,
         share=False,
         show_error=True,
+        css=NAV_CSS,
     )
 
 

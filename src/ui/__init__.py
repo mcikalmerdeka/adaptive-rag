@@ -1,5 +1,5 @@
 """Gradio UI package."""
 
-from .main_ui import build_app
+from .main_ui import NAV_CSS, build_app
 
-__all__ = ["build_app"]
+__all__ = ["NAV_CSS", "build_app"]

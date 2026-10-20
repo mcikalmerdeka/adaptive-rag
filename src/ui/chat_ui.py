@@ -1,4 +1,4 @@
-"""Chat tab: adaptive routing + grounded answers with citations.
+"""Chat page: adaptive routing + grounded answers with citations.
 
 Pipeline per turn:
     user msg
@@ -210,11 +210,17 @@ def _clear_chat() -> tuple[list[dict], str, str, str]:
 # ---- tab renderer ---------------------------------------------------------
 
 
-def render_chat_tab() -> None:
-    """Build the Chat tab."""
+def render_chat_page() -> None:
+    """Build the Chat page."""
     gr.Markdown(
         """
         ### Ask AdaptiveRAG
+
+        **Hybrid Adaptive RAG** with markdown-first ingestion, hybrid
+        search + cross-encoder reranking, query-time adaptive routing
+        (vector / SQL / hybrid / clarify), and Langfuse tracing. Convert
+        documents and videos, ingest them into Qdrant, then chat with
+        grounded citations.
 
         Each question is **routed at query time** to one of five strategies:
         `no_retrieval`, `vector_only`, `sql_only`, `hybrid`, or `clarify`.

@@ -1,4 +1,4 @@
-"""Admin tab — Langfuse cost / usage dashboard.
+"""Admin page — Langfuse cost / usage dashboard.
 
 Pulls daily metrics from Langfuse and renders a few markdown tables.
 Renders an empty-state with setup hints when keys aren't configured.
@@ -30,7 +30,7 @@ def _format_summary(summary: CostSummary) -> str:
     if summary.total_observations == 0:
         return (
             f"### No activity in window {summary.from_day} \u2192 {summary.to_day}\n\n"
-            "Run a few chat questions in the **Chat** tab and refresh."
+            "Run a few chat questions in the **Chat** page and refresh."
         )
     return (
         f"### Window: {summary.from_day} \u2192 {summary.to_day}\n\n"
@@ -134,8 +134,8 @@ def _refresh(window_days: int) -> tuple[str, str, str]:
     )
 
 
-def render_admin_tab() -> None:
-    """Render the Admin / Costs tab."""
+def render_admin_page() -> None:
+    """Render the Admin / Costs page."""
     enabled = is_langfuse_enabled()
 
     gr.Markdown(
